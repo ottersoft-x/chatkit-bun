@@ -1,0 +1,3 @@
+[submodule "packages/chatkit-python"]
+	path = packages/chatkit-python
+	url = https://github.com/openai/chatkit-python.git
