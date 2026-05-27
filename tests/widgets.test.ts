@@ -11,6 +11,7 @@ import {
   Col,
   DatePicker,
   Divider,
+  diffWidget,
   DynamicWidgetRootSchema,
   Form,
   Icon,
@@ -218,5 +219,73 @@ describe("widgets", () => {
       type: "Card",
       children: [{ type: "Text", value: "abc[1:]" }],
     });
+  });
+
+  test("diffWidget returns no updates for equal widgets", () => {
+    expect(diffWidget(Card({ children: [] }), Card({ children: [] }))).toEqual([]);
+  });
+
+  test("diffWidget streams cumulative Text value deltas", () => {
+    expect(
+      diffWidget(
+        Card({ children: [Text({ id: "text", value: "Hello", streaming: true })] }),
+        Card({ children: [Text({ id: "text", value: "Hello, world!", streaming: true })] }),
+      ),
+    ).toEqual([
+      {
+        type: "widget.streaming_text.value_delta",
+        component_id: "text",
+        delta: ", world!",
+        done: false,
+      },
+    ]);
+  });
+
+  test("diffWidget marks streaming Text deltas done when streaming stops", () => {
+    expect(
+      diffWidget(
+        Card({ children: [Text({ id: "text", value: "Hello", streaming: true })] }),
+        Card({ children: [Text({ id: "text", value: "Hello, world!", streaming: false })] }),
+      ),
+    ).toEqual([
+      {
+        type: "widget.streaming_text.value_delta",
+        component_id: "text",
+        delta: ", world!",
+        done: true,
+      },
+    ]);
+  });
+
+  test("diffWidget returns a root replacement for non-streaming text changes", () => {
+    expect(
+      diffWidget(
+        Card({ children: [Text({ value: "Hello" })] }),
+        Card({ children: [Text({ value: "world!" })] }),
+      ),
+    ).toEqual([
+      {
+        type: "widget.root.updated",
+        widget: { type: "Card", children: [{ type: "Text", value: "world!" }] },
+      },
+    ]);
+  });
+
+  test("diffWidget rejects late streaming node ids", () => {
+    expect(() =>
+      diffWidget(
+        Card({ children: [Text({ value: "Hello", streaming: true })] }),
+        Card({ children: [Text({ id: "text", value: "Hello, world!", streaming: true })] }),
+      ),
+    ).toThrow("was not present when the widget was initially rendered");
+  });
+
+  test("diffWidget rejects non-cumulative streaming text updates", () => {
+    expect(() =>
+      diffWidget(
+        Card({ children: [Text({ id: "text", value: "Hello", streaming: true })] }),
+        Card({ children: [Text({ id: "text", value: "world!", streaming: true })] }),
+      ),
+    ).toThrow("not a prefix");
   });
 });

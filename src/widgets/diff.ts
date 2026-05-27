@@ -1,0 +1,149 @@
+import type { ThreadItemUpdate } from "../types/server";
+import { serializeWidget } from "./serialization";
+import type { WidgetRoot } from "./types";
+
+type WidgetNode = Record<string, unknown>;
+type WidgetDiffUpdate = Extract<
+  ThreadItemUpdate,
+  { type: "widget.root.updated" | "widget.streaming_text.value_delta" }
+>;
+
+function asNode(value: unknown): WidgetNode {
+  return value != null && typeof value === "object" && !Array.isArray(value)
+    ? (value as WidgetNode)
+    : {};
+}
+
+function childrenOf(node: WidgetNode): WidgetNode[] {
+  const children = node.children;
+  if (Array.isArray(children)) return children.map(asNode);
+  if (children != null && typeof children === "object") return [asNode(children)];
+  return [];
+}
+
+function isStreamingText(node: WidgetNode): boolean {
+  return (node.type === "Text" || node.type === "Markdown") && typeof node.value === "string";
+}
+
+function jsonEqual(before: unknown, after: unknown): boolean {
+  return JSON.stringify(before) === JSON.stringify(after);
+}
+
+function canStreamValueChange(before: WidgetNode, after: WidgetNode): boolean {
+  return (
+    isStreamingText(before) &&
+    isStreamingText(after) &&
+    typeof before.id === "string" &&
+    before.id === after.id &&
+    String(after.value).startsWith(String(before.value))
+  );
+}
+
+function requiresFullReplace(before: WidgetNode, after: WidgetNode): boolean {
+  if (before.type !== after.type || before.id !== after.id || before.key !== after.key) {
+    return true;
+  }
+
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  for (const key of keys) {
+    const beforeValue = before[key];
+    const afterValue = after[key];
+
+    if (key === "value" && canStreamValueChange(before, after)) continue;
+    if (key === "streaming" && isStreamingText(before) && isStreamingText(after)) continue;
+
+    if (Array.isArray(beforeValue) && Array.isArray(afterValue)) {
+      if (beforeValue.length !== afterValue.length) return true;
+      for (let index = 0; index < beforeValue.length; index += 1) {
+        if (requiresFullReplace(asNode(beforeValue[index]), asNode(afterValue[index]))) {
+          return true;
+        }
+      }
+      continue;
+    }
+
+    if (
+      beforeValue != null &&
+      afterValue != null &&
+      typeof beforeValue === "object" &&
+      typeof afterValue === "object" &&
+      !Array.isArray(beforeValue) &&
+      !Array.isArray(afterValue)
+    ) {
+      if (requiresFullReplace(asNode(beforeValue), asNode(afterValue))) return true;
+      continue;
+    }
+
+    if (!jsonEqual(beforeValue, afterValue)) return true;
+  }
+
+  return false;
+}
+
+function streamingTextById(root: WidgetNode): Map<string, WidgetNode> {
+  const nodes = new Map<string, WidgetNode>();
+
+  function visit(node: WidgetNode): void {
+    if (isStreamingText(node) && typeof node.id === "string") {
+      nodes.set(node.id, node);
+    }
+    for (const child of childrenOf(node)) visit(child);
+  }
+
+  visit(root);
+  return nodes;
+}
+
+function validateStreamingTextUpdates(
+  beforeNodes: Map<string, WidgetNode>,
+  afterNodes: Map<string, WidgetNode>,
+): void {
+  for (const [id, afterNode] of afterNodes) {
+    const beforeNode = beforeNodes.get(id);
+    if (!beforeNode) {
+      throw new Error(
+        `Node ${id} was not present when the widget was initially rendered. All nodes with ID must persist across all widget updates.`,
+      );
+    }
+
+    const beforeValue = String(beforeNode.value);
+    const afterValue = String(afterNode.value);
+    if (!afterValue.startsWith(beforeValue)) {
+      throw new Error(
+        `Node ${id} was updated with a new value that is not a prefix of the initial value. All widget updates must be cumulative.`,
+      );
+    }
+  }
+}
+
+export function diffWidget(before: WidgetRoot, after: WidgetRoot): WidgetDiffUpdate[] {
+  const beforeRoot = serializeWidget(before);
+  const afterRoot = serializeWidget(after);
+  const beforeNodes = streamingTextById(beforeRoot);
+  const afterNodes = streamingTextById(afterRoot);
+
+  validateStreamingTextUpdates(beforeNodes, afterNodes);
+
+  if (requiresFullReplace(beforeRoot, afterRoot)) {
+    return [{ type: "widget.root.updated", widget: afterRoot }];
+  }
+
+  const updates: WidgetDiffUpdate[] = [];
+  for (const [id, afterNode] of afterNodes) {
+    const beforeNode = beforeNodes.get(id);
+    if (!beforeNode) continue;
+
+    const beforeValue = String(beforeNode.value);
+    const afterValue = String(afterNode.value);
+    if (beforeValue === afterValue) continue;
+
+    updates.push({
+      type: "widget.streaming_text.value_delta",
+      component_id: id,
+      delta: afterValue.slice(beforeValue.length),
+      done: afterNode.streaming !== true,
+    });
+  }
+
+  return updates;
+}
