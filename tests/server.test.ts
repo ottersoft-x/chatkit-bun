@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
+import type { ActionConfig } from "../src/actions";
 import { NotFoundError, UnsupportedOperationError } from "../src/errors";
 import { ChatKitServer, NonStreamingResult, StreamingResult } from "../src/server";
 import { SQLiteStore } from "../src/sqlite-store";
@@ -8,6 +9,7 @@ import type { Attachment, ThreadItem, ThreadMetadata } from "../src/types/core";
 import type {
   AudioInput,
   FeedbackKind,
+  SyncCustomActionResponse,
   ThreadStreamEvent,
   TranscriptionResult,
 } from "../src/types/server";
@@ -20,6 +22,8 @@ const defaultContext: RequestContext = { user_id: "user_1" };
 
 type UserMessageItem = Extract<ThreadItem, { type: "user_message" }>;
 type AssistantMessageItem = Extract<ThreadItem, { type: "assistant_message" }>;
+type StructuredInputItem = Extract<ThreadItem, { type: "structured_input" }>;
+type WidgetItem = Extract<ThreadItem, { type: "widget" }>;
 type Responder = (
   thread: ThreadMetadata,
   inputUserMessage: UserMessageItem | null,
@@ -29,6 +33,18 @@ type Transcriber = (
   audio: AudioInput,
   context: RequestContext,
 ) => Promise<TranscriptionResult>;
+type ActionResponder = (
+  thread: ThreadMetadata,
+  action: ActionConfig,
+  sender: WidgetItem | null,
+  context: RequestContext,
+) => AsyncIterable<ThreadStreamEvent>;
+type SyncActionResponder = (
+  thread: ThreadMetadata,
+  action: ActionConfig,
+  sender: WidgetItem | null,
+  context: RequestContext,
+) => Promise<SyncCustomActionResponse>;
 
 async function* emptyResponse(): AsyncIterable<ThreadStreamEvent> {}
 
@@ -63,6 +79,41 @@ function makeUserMessage(id: string, threadId = "thr_test"): UserMessageItem {
     content: [{ type: "input_text", text: "Hello" }],
     attachments: [],
     inference_options: {},
+  };
+}
+
+function makeStructuredInputItem(threadId = "thr_test"): StructuredInputItem {
+  return {
+    id: "si_test",
+    type: "structured_input",
+    thread_id: threadId,
+    created_at: "2026-05-27T00:00:02.000Z",
+    status: "pending",
+    inputs: [
+      {
+        id: "subject",
+        type: "multiple_choice",
+        question: "Subject?",
+        options: [{ value: "Math" }, { value: "Science" }, { value: "History" }],
+        multiple: false,
+      },
+      {
+        id: "notes",
+        type: "freeform",
+        question: "Anything else?",
+        description: "Optional context",
+      },
+    ],
+  };
+}
+
+function makeWidgetItem(threadId = "thr_test"): WidgetItem {
+  return {
+    id: "widget_test",
+    type: "widget",
+    thread_id: threadId,
+    created_at: "2026-05-27T00:00:02.000Z",
+    widget: { type: "Card", children: [] },
   };
 }
 
@@ -106,6 +157,8 @@ class TestServer extends ChatKitServer<RequestContext> {
     private readonly responder: Responder = emptyResponse,
     private readonly transcriber?: Transcriber,
     attachmentStore: AttachmentStore<RequestContext> | null = null,
+    private readonly actionResponder?: ActionResponder,
+    private readonly syncActionResponder?: SyncActionResponder,
   ) {
     super(
       new SQLiteStore<RequestContext>({
@@ -138,6 +191,24 @@ class TestServer extends ChatKitServer<RequestContext> {
     context: RequestContext,
   ): Promise<TranscriptionResult> {
     return this.transcriber?.(audio, context) ?? super.transcribe(audio, context);
+  }
+
+  override action(
+    thread: ThreadMetadata,
+    action: ActionConfig,
+    sender: WidgetItem | null,
+    context: RequestContext,
+  ): AsyncIterable<ThreadStreamEvent> {
+    return this.actionResponder?.(thread, action, sender, context) ?? super.action(thread, action, sender, context);
+  }
+
+  override syncAction(
+    thread: ThreadMetadata,
+    action: ActionConfig,
+    sender: WidgetItem | null,
+    context: RequestContext,
+  ): Promise<SyncCustomActionResponse> {
+    return this.syncActionResponder?.(thread, action, sender, context) ?? super.syncAction(thread, action, sender, context);
   }
 }
 
@@ -652,6 +723,430 @@ describe("ChatKitServer", () => {
       allowed_image_domains: ["example.com"],
       metadata: { topic: "support", priority: 1 },
     });
+  });
+
+  test("adds client tool output and resumes the responder", async () => {
+    const responderCalls: Array<UserMessageItem | null> = [];
+    const server = new TestServer(async function* (thread, inputUserMessage) {
+      responderCalls.push(structuredClone(inputUserMessage));
+
+      if (inputUserMessage) {
+        yield {
+          type: "thread.item.done",
+          item: {
+            id: "tool_call_test",
+            type: "client_tool_call",
+            thread_id: thread.id,
+            created_at: "2026-05-27T00:00:02.000Z",
+            status: "pending",
+            call_id: "call_test",
+            name: "select_file",
+            arguments: { accept: "text/plain" },
+          },
+        };
+      } else {
+        yield { type: "progress_update", text: "resumed" };
+      }
+    });
+
+    const createResult = (await server.process(
+      JSON.stringify({
+        type: "threads.create",
+        params: {
+          input: {
+            content: [{ type: "input_text", text: "Pick a file" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+    const createEvents = await decodeStream(createResult);
+    const threadId =
+      createEvents[0]?.type === "thread.created" ? createEvents[0].thread.id : "missing_thread";
+
+    const continuationResult = (await server.process(
+      JSON.stringify({
+        type: "threads.add_client_tool_output",
+        params: { thread_id: threadId, result: { file_id: "file_1" } },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const continuationEvents = await decodeStream(continuationResult);
+    expect(continuationEvents.map((event) => event.type)).toEqual([
+      "stream_options",
+      "progress_update",
+    ]);
+    expect(responderCalls).toHaveLength(2);
+    expect(responderCalls[1]).toBeNull();
+    await expect(server.store.loadItem(threadId, "tool_call_test", defaultContext)).resolves.toMatchObject({
+      type: "client_tool_call",
+      status: "completed",
+      output: { file_id: "file_1" },
+    });
+  });
+
+  test("replaces structured input answers and resumes the responder", async () => {
+    const responderCalls: Array<UserMessageItem | null> = [];
+    const server = new TestServer(async function* (_thread, inputUserMessage) {
+      responderCalls.push(structuredClone(inputUserMessage));
+      yield { type: "progress_update", text: "continued" };
+    });
+    const thread = makeThread();
+    const item = makeStructuredInputItem(thread.id);
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, item, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_structured_input",
+        params: {
+          thread_id: thread.id,
+          item_id: item.id,
+          input: {
+            status: "answered",
+            answers: {
+              subject: { values: ["Science"] },
+              notes: { values: ["Needs visuals"] },
+            },
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.map((event) => event.type)).toEqual([
+      "stream_options",
+      "thread.item.replaced",
+      "progress_update",
+    ]);
+    expect(events[1]).toMatchObject({
+      type: "thread.item.replaced",
+      item: {
+        id: item.id,
+        status: "answered",
+        inputs: [
+          { id: "subject", answer: { values: ["Science"], skipped: false } },
+          { id: "notes", answer: { values: ["Needs visuals"], skipped: false } },
+        ],
+      },
+    });
+    expect(responderCalls).toEqual([null]);
+    await expect(server.store.loadItem(thread.id, item.id, defaultContext)).resolves.toMatchObject({
+      type: "structured_input",
+      status: "answered",
+      inputs: [
+        { id: "subject", answer: { values: ["Science"], skipped: false } },
+        { id: "notes", answer: { values: ["Needs visuals"], skipped: false } },
+      ],
+    });
+  });
+
+  test("marks omitted structured input answers as skipped", async () => {
+    const server = new TestServer();
+    const thread = makeThread();
+    const item = makeStructuredInputItem(thread.id);
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, item, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_structured_input",
+        params: {
+          thread_id: thread.id,
+          item_id: item.id,
+          input: {
+            status: "answered",
+            answers: { subject: { values: ["Math"] } },
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events[1]).toMatchObject({
+      type: "thread.item.replaced",
+      item: {
+        inputs: [
+          { id: "subject", answer: { values: ["Math"], skipped: false } },
+          { id: "notes", answer: { values: [], skipped: true } },
+        ],
+      },
+    });
+    await expect(server.store.loadItem(thread.id, item.id, defaultContext)).resolves.toMatchObject({
+      inputs: [
+        { id: "subject", answer: { values: ["Math"], skipped: false } },
+        { id: "notes", answer: { values: [], skipped: true } },
+      ],
+    });
+  });
+
+  test("ignores unknown structured input answer ids", async () => {
+    const server = new TestServer();
+    const thread = makeThread();
+    const item = makeStructuredInputItem(thread.id);
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, item, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_structured_input",
+        params: {
+          thread_id: thread.id,
+          item_id: item.id,
+          input: {
+            status: "answered",
+            answers: {
+              subject: { values: ["History"] },
+              missing_question: { values: ["ignored"] },
+            },
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events[1]).toMatchObject({
+      type: "thread.item.replaced",
+      item: {
+        inputs: [
+          { id: "subject", answer: { values: ["History"], skipped: false } },
+          { id: "notes", answer: { values: [], skipped: true } },
+        ],
+      },
+    });
+    const persisted = await server.store.loadItem(thread.id, item.id, defaultContext);
+    expect(JSON.stringify(persisted)).not.toContain("missing_question");
+  });
+
+  test("truncates single-choice structured input answers to one value", async () => {
+    const server = new TestServer();
+    const thread = makeThread();
+    const item = makeStructuredInputItem(thread.id);
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, item, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_structured_input",
+        params: {
+          thread_id: thread.id,
+          item_id: item.id,
+          input: {
+            status: "answered",
+            answers: {
+              subject: { values: ["Science", "History"] },
+              notes: { values: ["Keep all text"] },
+            },
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events[1]).toMatchObject({
+      type: "thread.item.replaced",
+      item: {
+        inputs: [
+          { id: "subject", answer: { values: ["Science"], skipped: false } },
+          { id: "notes", answer: { values: ["Keep all text"], skipped: false } },
+        ],
+      },
+    });
+    await expect(server.store.loadItem(thread.id, item.id, defaultContext)).resolves.toMatchObject({
+      inputs: [
+        { id: "subject", answer: { values: ["Science"], skipped: false } },
+        { id: "notes", answer: { values: ["Keep all text"], skipped: false } },
+      ],
+    });
+  });
+
+  test("retry after a user message removes later items before resuming", async () => {
+    const itemsAtResume: string[][] = [];
+    const resumedWith: Array<UserMessageItem | null> = [];
+    let server!: TestServer;
+    server = new TestServer(async function* (thread, inputUserMessage) {
+      resumedWith.push(structuredClone(inputUserMessage));
+      const items = await server.store.loadThreadItems(thread.id, null, 10, "asc", defaultContext);
+      itemsAtResume.push(items.data.map((item) => item.id));
+      yield { type: "progress_update", text: "retrying" };
+    });
+    const thread = makeThread();
+    const userMessage = makeUserMessage("msg_retry", thread.id);
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, userMessage, defaultContext);
+    await server.store.addThreadItem(thread.id, makeAssistantMessage("First response"), defaultContext);
+    await server.store.addThreadItem(thread.id, makeWidgetItem(thread.id), defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.retry_after_item",
+        params: { thread_id: thread.id, item_id: userMessage.id },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.map((event) => event.type)).toEqual(["stream_options", "progress_update"]);
+    expect(resumedWith[0]).toMatchObject({ id: userMessage.id, type: "user_message" });
+    expect(itemsAtResume).toEqual([[userMessage.id]]);
+    const persistedItems = await server.store.loadThreadItems(thread.id, null, 10, "asc", defaultContext);
+    expect(persistedItems.data.map((item) => item.id)).toEqual([userMessage.id]);
+  });
+
+  test("retry after a non-user item rejects", async () => {
+    const server = new TestServer();
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, makeAssistantMessage("Not retryable"), defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.retry_after_item",
+        params: { thread_id: thread.id, item_id: "msg_test" },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    await expect(decodeStream(result)).rejects.toThrow("not a user message");
+  });
+
+  test("routes custom actions with widget senders", async () => {
+    const actionCalls: Array<{
+      thread: ThreadMetadata;
+      action: ActionConfig;
+      sender: WidgetItem | null;
+      context: RequestContext;
+    }> = [];
+    const server = new TestServer(
+      emptyResponse,
+      undefined,
+      null,
+      async function* (thread, action, sender, context) {
+        actionCalls.push({
+          thread: structuredClone(thread),
+          action: structuredClone(action),
+          sender: structuredClone(sender),
+          context,
+        });
+        yield { type: "progress_update", text: "action handled" };
+      },
+    );
+    const thread = makeThread();
+    const widget = makeWidgetItem(thread.id);
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, widget, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.custom_action",
+        params: {
+          thread_id: thread.id,
+          item_id: widget.id,
+          action: { type: "open", payload: { id: 1 }, handler: "server" },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.map((event) => event.type)).toEqual(["stream_options", "progress_update"]);
+    expect(actionCalls).toEqual([
+      {
+        thread,
+        action: {
+          type: "open",
+          payload: { id: 1 },
+          handler: "server",
+          loadingBehavior: "auto",
+          streaming: true,
+        },
+        sender: widget,
+        context: defaultContext,
+      },
+    ]);
+  });
+
+  test("serializes sync custom action updated items from widget senders", async () => {
+    const syncActionCalls: Array<{
+      thread: ThreadMetadata;
+      action: ActionConfig;
+      sender: WidgetItem | null;
+      context: RequestContext;
+    }> = [];
+    const server = new TestServer(
+      emptyResponse,
+      undefined,
+      null,
+      undefined,
+      async (thread, action, sender, context) => {
+        syncActionCalls.push({
+          thread: structuredClone(thread),
+          action: structuredClone(action),
+          sender: structuredClone(sender),
+          context,
+        });
+        return {
+          updated_item: {
+            ...sender!,
+            widget: { type: "Card", children: [{ type: "Text", children: "Updated" }] },
+          },
+        };
+      },
+    );
+    const thread = makeThread();
+    const widget = makeWidgetItem(thread.id);
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, widget, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.sync_custom_action",
+        params: {
+          thread_id: thread.id,
+          item_id: widget.id,
+          action: { type: "update", payload: { value: true } },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as NonStreamingResult;
+
+    expect(decodeJson(result)).toEqual({
+      updated_item: {
+        ...widget,
+        widget: { type: "Card", children: [{ type: "Text", children: "Updated" }] },
+      },
+    });
+    expect(syncActionCalls).toEqual([
+      {
+        thread,
+        action: {
+          type: "update",
+          payload: { value: true },
+          handler: "server",
+          loadingBehavior: "auto",
+          streaming: true,
+        },
+        sender: widget,
+        context: defaultContext,
+      },
+    ]);
   });
 
   test("rejects default transcription requests", async () => {

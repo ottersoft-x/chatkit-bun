@@ -15,6 +15,7 @@ import {
   type NonStreamingRequest,
   type StreamOptions,
   type StreamingRequest,
+  type StructuredInputSubmission,
   type SyncCustomActionResponse,
   type Thread,
   type ThreadCustomActionParams,
@@ -29,6 +30,9 @@ const sseDecoder = new TextDecoder();
 
 type UserMessageItem = Extract<ThreadItem, { type: "user_message" }>;
 type AssistantMessageItem = Extract<ThreadItem, { type: "assistant_message" }>;
+type ClientToolCallItem = Extract<ThreadItem, { type: "client_tool_call" }>;
+type StructuredInputItem = Extract<ThreadItem, { type: "structured_input" }>;
+type WidgetItem = Extract<ThreadItem, { type: "widget" }>;
 type ProcessRequestInput = string | Uint8Array | ArrayBuffer;
 
 export class StreamingResult implements AsyncIterable<Uint8Array> {
@@ -68,14 +72,21 @@ export abstract class ChatKitServer<TContext = unknown> {
     );
   }
 
-  async action(_params: ThreadCustomActionParams, _context: TContext): Promise<void> {
+  async *action(
+    _thread: ThreadMetadata,
+    _action: ThreadCustomActionParams["action"],
+    _sender: WidgetItem | null,
+    _context: TContext,
+  ): AsyncIterable<ThreadStreamEvent> {
     throw new UnsupportedOperationError(
       "The action() method must be overridden to react to actions.",
     );
   }
 
   async syncAction(
-    _params: ThreadCustomActionParams,
+    _thread: ThreadMetadata,
+    _action: ThreadCustomActionParams["action"],
+    _sender: WidgetItem | null,
     _context: TContext,
   ): Promise<SyncCustomActionResponse> {
     throw new UnsupportedOperationError(
@@ -300,9 +311,185 @@ export abstract class ChatKitServer<TContext = unknown> {
   }
 
   protected async *processStreamingContinuation(
-    _request: Exclude<StreamingRequest, { type: "threads.create" | "threads.add_user_message" }>,
-    _context: TContext,
-  ): AsyncIterable<ThreadStreamEvent> {}
+    request: Exclude<StreamingRequest, { type: "threads.create" | "threads.add_user_message" }>,
+    context: TContext,
+  ): AsyncIterable<ThreadStreamEvent> {
+    switch (request.type) {
+      case "threads.add_client_tool_output": {
+        const thread = await this.store.loadThread(request.params.thread_id, context);
+        const items = await this.store.loadThreadItems(
+          thread.id,
+          null,
+          DEFAULT_PAGE_SIZE,
+          "desc",
+          context,
+        );
+        const toolCall = items.data.find(
+          (item): item is ClientToolCallItem =>
+            item.type === "client_tool_call" && item.status === "pending",
+        );
+
+        if (!toolCall) {
+          throw new Error(`Last thread item in ${thread.id} was not a ClientToolCallItem`);
+        }
+
+        await this.store.saveItem(
+          thread.id,
+          { ...toolCall, status: "completed", output: request.params.result },
+          context,
+        );
+        await this.cleanupPendingClientToolCall(thread, context);
+        yield* this.processEvents(thread, context, () => this.respond(thread, null, context));
+        return;
+      }
+
+      case "threads.add_structured_input": {
+        const thread = await this.store.loadThread(request.params.thread_id, context);
+        const item = await this.store.loadItem(thread.id, request.params.item_id, context);
+
+        if (item.type !== "structured_input") {
+          throw new Error(`Item ${request.params.item_id} is not a StructuredInputItem`);
+        }
+
+        const updatedItem = this.applyStructuredInputSubmission(item, request.params.input);
+        const server = this;
+        yield* this.processEvents(thread, context, async function* (): AsyncIterable<ThreadStreamEvent> {
+          yield { type: "thread.item.replaced", item: updatedItem };
+          yield* server.respond(thread, null, context);
+        });
+        return;
+      }
+
+      case "threads.retry_after_item": {
+        const thread = await this.store.loadThread(request.params.thread_id, context);
+        const userMessage = await this.removeItemsAfterUserMessage(
+          thread,
+          request.params.item_id,
+          context,
+        );
+        yield* this.processEvents(thread, context, () => this.respond(thread, userMessage, context));
+        return;
+      }
+
+      case "threads.custom_action": {
+        const thread = await this.store.loadThread(request.params.thread_id, context);
+        const sender =
+          request.params.item_id != null
+            ? await this.store.loadItem(thread.id, request.params.item_id, context)
+            : null;
+
+        if (sender && sender.type !== "widget") {
+          yield { type: "error", code: "stream.error", allow_retry: false };
+          return;
+        }
+
+        yield* this.processEvents(thread, context, () =>
+          this.action(thread, request.params.action, sender, context),
+        );
+        return;
+      }
+
+      default: {
+        const _exhaustive: never = request;
+        return _exhaustive;
+      }
+    }
+  }
+
+  protected async cleanupPendingClientToolCall(
+    thread: ThreadMetadata,
+    context: TContext,
+  ): Promise<void> {
+    const items = await this.store.loadThreadItems(
+      thread.id,
+      null,
+      DEFAULT_PAGE_SIZE,
+      "desc",
+      context,
+    );
+
+    for (const item of items.data) {
+      if (item.type === "client_tool_call" && item.status === "pending") {
+        await this.store.deleteThreadItem(thread.id, item.id, context);
+      }
+    }
+  }
+
+  protected applyStructuredInputSubmission(
+    item: StructuredInputItem,
+    submission: StructuredInputSubmission,
+  ): StructuredInputItem {
+    if (item.status !== "pending") {
+      throw new Error(`Structured input item ${item.id} is not pending`);
+    }
+
+    return {
+      ...item,
+      status: submission.status,
+      inputs: item.inputs.map((question) => {
+        const answer = submission.answers[question.id];
+
+        if (
+          submission.status === "skipped" ||
+          !answer ||
+          answer.skipped ||
+          (answer.values?.length ?? 0) === 0
+        ) {
+          return { ...question, answer: { values: [], skipped: true } };
+        }
+
+        const values =
+          question.type === "multiple_choice" && !question.multiple
+            ? answer.values!.slice(0, 1)
+            : answer.values!;
+
+        return { ...question, answer: { values, skipped: false } };
+      }),
+    };
+  }
+
+  protected async removeItemsAfterUserMessage(
+    thread: ThreadMetadata,
+    itemId: string,
+    context: TContext,
+  ): Promise<UserMessageItem> {
+    const itemsToRemove: ThreadItem[] = [];
+    let after: string | null = null;
+
+    while (true) {
+      const page = await this.store.loadThreadItems(
+        thread.id,
+        after,
+        DEFAULT_PAGE_SIZE,
+        "desc",
+        context,
+      );
+
+      for (const item of page.data) {
+        if (item.id === itemId) {
+          if (item.type !== "user_message") {
+            throw new Error(`Item ${itemId} is not a user message`);
+          }
+
+          for (const itemToRemove of itemsToRemove) {
+            await this.store.deleteThreadItem(thread.id, itemToRemove.id, context);
+          }
+
+          return item;
+        }
+
+        itemsToRemove.push(item);
+      }
+
+      if (!page.has_more) {
+        break;
+      }
+
+      after = page.after ?? null;
+    }
+
+    throw new Error(`Item ${itemId} was not found`);
+  }
 
   protected async *processEvents(
     thread: ThreadMetadata,
@@ -465,15 +652,19 @@ export abstract class ChatKitServer<TContext = unknown> {
     context: TContext,
   ): Promise<SyncCustomActionResponse> {
     const { thread_id, item_id } = request.params;
-    await this.store.loadThread(thread_id, context);
+    const thread = await this.store.loadThread(thread_id, context);
+    let sender: WidgetItem | null = null;
 
     if (item_id != null) {
-      const sender = await this.store.loadItem(thread_id, item_id, context);
-      if (sender.type !== "widget") {
+      const item = await this.store.loadItem(thread_id, item_id, context);
+      if (item.type !== "widget") {
         throw new ValidationError("Sync custom actions can only be sent by widget items.");
       }
+      sender = item;
     }
 
-    return SyncCustomActionResponseSchema.parse(await this.syncAction(request.params, context));
+    return SyncCustomActionResponseSchema.parse(
+      await this.syncAction(thread, request.params.action, sender, context),
+    );
   }
 }
