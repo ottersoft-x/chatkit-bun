@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { z } from "zod";
 
 import {
+  AssistantMessageContentSchema,
   AttachmentSchema,
   PageSchema,
   ThreadItemSchema,
   ThreadMetadataSchema,
+  UserMessageContentSchema,
 } from "../src/types/core";
 
 describe("core schemas", () => {
@@ -126,5 +128,92 @@ describe("core schemas", () => {
       throw new Error(`Expected widget item, got ${item.type}`);
     }
     expect(item.widget).toEqual({ type: "Card", children: [] });
+  });
+
+  test("parses user and assistant message content", () => {
+    const user = UserMessageContentSchema.parse({ type: "input_text", text: "Hello" });
+    expect(user).toEqual({ type: "input_text", text: "Hello" });
+
+    const assistant = AssistantMessageContentSchema.parse({
+      type: "output_text",
+      text: "Hi",
+      annotations: [],
+    });
+    expect(assistant.text).toBe("Hi");
+  });
+
+  test("preserves arbitrary user message inference options", () => {
+    const inference_options = {
+      model: "gpt-4.1",
+      temperature: 0.2,
+      metadata: { trace_id: "trace_1" },
+      runtime: "server",
+    };
+
+    const item = ThreadItemSchema.parse({
+      id: "msg_1",
+      type: "user_message",
+      thread_id: "thr_1",
+      created_at: "2026-05-27T00:00:00.000Z",
+      content: [{ type: "input_text", text: "Hello" }],
+      inference_options,
+    });
+
+    if (item.type !== "user_message") {
+      throw new Error(`Expected user_message item, got ${item.type}`);
+    }
+    expect(item.inference_options).toEqual(inference_options);
+  });
+
+  test("parses structured input, generated image, task, and workflow items", () => {
+    const created_at = "2026-05-27T00:00:00.000Z";
+    expect(
+      ThreadItemSchema.parse({
+        id: "si_1",
+        type: "structured_input",
+        thread_id: "thr_1",
+        created_at,
+        status: "pending",
+        inputs: [
+          {
+            id: "subject",
+            type: "multiple_choice",
+            question: "Subject?",
+            options: [{ value: "Math" }],
+            multiple: false,
+          },
+        ],
+      }).type,
+    ).toBe("structured_input");
+
+    expect(
+      ThreadItemSchema.parse({
+        id: "img_1",
+        type: "generated_image",
+        thread_id: "thr_1",
+        created_at,
+        image: { id: "image", url: "https://example.com/image.png" },
+      }).type,
+    ).toBe("generated_image");
+
+    expect(
+      ThreadItemSchema.parse({
+        id: "task_1",
+        type: "task",
+        thread_id: "thr_1",
+        created_at,
+        task: { type: "custom", title: "Step", content: "Working", status_indicator: "loading" },
+      }).type,
+    ).toBe("task");
+
+    expect(
+      ThreadItemSchema.parse({
+        id: "wf_1",
+        type: "workflow",
+        thread_id: "thr_1",
+        created_at,
+        workflow: { type: "custom", tasks: [], expanded: false },
+      }).type,
+    ).toBe("workflow");
   });
 });
