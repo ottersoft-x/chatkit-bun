@@ -317,17 +317,14 @@ export abstract class ChatKitServer<TContext = unknown> {
     switch (request.type) {
       case "threads.add_client_tool_output": {
         const thread = await this.store.loadThread(request.params.thread_id, context);
-        const items = await this.store.loadThreadItems(
-          thread.id,
-          null,
-          DEFAULT_PAGE_SIZE,
-          "desc",
-          context,
-        );
-        const toolCall = items.data.find(
-          (item): item is ClientToolCallItem =>
-            item.type === "client_tool_call" && item.status === "pending",
-        );
+        let toolCall: ClientToolCallItem | null = null;
+
+        for await (const item of this.loadThreadItemsDescending(thread, context)) {
+          if (item.type === "client_tool_call" && item.status === "pending") {
+            toolCall = item;
+            break;
+          }
+        }
 
         if (!toolCall) {
           throw new Error(`Last thread item in ${thread.id} was not a ClientToolCallItem`);
@@ -396,22 +393,45 @@ export abstract class ChatKitServer<TContext = unknown> {
     }
   }
 
+  protected async *loadThreadItemsDescending(
+    thread: ThreadMetadata,
+    context: TContext,
+  ): AsyncIterable<ThreadItem> {
+    let after: string | null = null;
+
+    while (true) {
+      const page = await this.store.loadThreadItems(
+        thread.id,
+        after,
+        DEFAULT_PAGE_SIZE,
+        "desc",
+        context,
+      );
+
+      yield* page.data;
+
+      if (!page.has_more) {
+        return;
+      }
+
+      after = page.after ?? null;
+    }
+  }
+
   protected async cleanupPendingClientToolCall(
     thread: ThreadMetadata,
     context: TContext,
   ): Promise<void> {
-    const items = await this.store.loadThreadItems(
-      thread.id,
-      null,
-      DEFAULT_PAGE_SIZE,
-      "desc",
-      context,
-    );
+    const pendingItemIds: string[] = [];
 
-    for (const item of items.data) {
+    for await (const item of this.loadThreadItemsDescending(thread, context)) {
       if (item.type === "client_tool_call" && item.status === "pending") {
-        await this.store.deleteThreadItem(thread.id, item.id, context);
+        pendingItemIds.push(item.id);
       }
+    }
+
+    for (const itemId of pendingItemIds) {
+      await this.store.deleteThreadItem(thread.id, itemId, context);
     }
   }
 

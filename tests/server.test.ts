@@ -6,12 +6,13 @@ import { ChatKitServer, NonStreamingResult, StreamingResult } from "../src/serve
 import { SQLiteStore } from "../src/sqlite-store";
 import type { AttachmentStore } from "../src/store";
 import type { Attachment, ThreadItem, ThreadMetadata } from "../src/types/core";
-import type {
-  AudioInput,
-  FeedbackKind,
-  SyncCustomActionResponse,
-  ThreadStreamEvent,
-  TranscriptionResult,
+import {
+  DEFAULT_PAGE_SIZE,
+  type AudioInput,
+  type FeedbackKind,
+  type SyncCustomActionResponse,
+  type ThreadStreamEvent,
+  type TranscriptionResult,
 } from "../src/types/server";
 
 interface RequestContext {
@@ -788,6 +789,79 @@ describe("ChatKitServer", () => {
       status: "completed",
       output: { file_id: "file_1" },
     });
+  });
+
+  test("finds and cleans pending client tool calls beyond the first item page", async () => {
+    const responderCalls: Array<UserMessageItem | null> = [];
+    const server = new TestServer(async function* (_thread, inputUserMessage) {
+      responderCalls.push(structuredClone(inputUserMessage));
+      yield { type: "progress_update", text: "resumed" };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(
+      thread.id,
+      {
+        id: "tool_call_dangling",
+        type: "client_tool_call",
+        thread_id: thread.id,
+        created_at: "2026-05-27T00:00:01.000Z",
+        status: "pending",
+        call_id: "call_dangling",
+        name: "old_tool",
+        arguments: {},
+      },
+      defaultContext,
+    );
+    await server.store.addThreadItem(
+      thread.id,
+      {
+        id: "tool_call_target",
+        type: "client_tool_call",
+        thread_id: thread.id,
+        created_at: "2026-05-27T00:00:02.000Z",
+        status: "pending",
+        call_id: "call_target",
+        name: "select_file",
+        arguments: { accept: "text/plain" },
+      },
+      defaultContext,
+    );
+
+    for (let index = 0; index < DEFAULT_PAGE_SIZE; index++) {
+      await server.store.addThreadItem(
+        thread.id,
+        {
+          id: `msg_newer_${index}`,
+          type: "assistant_message",
+          thread_id: thread.id,
+          created_at: `2026-05-27T00:00:${String(index + 3).padStart(2, "0")}.000Z`,
+          content: [{ type: "output_text", text: `newer ${index}`, annotations: [] }],
+        },
+        defaultContext,
+      );
+    }
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_client_tool_output",
+        params: { thread_id: thread.id, result: { file_id: "file_2" } },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.map((event) => event.type)).toEqual(["stream_options", "progress_update"]);
+    expect(responderCalls).toEqual([null]);
+    await expect(server.store.loadItem(thread.id, "tool_call_target", defaultContext)).resolves.toMatchObject({
+      type: "client_tool_call",
+      status: "completed",
+      output: { file_id: "file_2" },
+    });
+    await expect(server.store.loadItem(thread.id, "tool_call_dangling", defaultContext)).rejects.toBeInstanceOf(
+      NotFoundError,
+    );
   });
 
   test("replaces structured input answers and resumes the responder", async () => {
