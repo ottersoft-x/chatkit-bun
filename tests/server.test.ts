@@ -453,7 +453,205 @@ describe("ChatKitServer", () => {
     );
 
     expect(result).toBeInstanceOf(StreamingResult);
-    expect(await decodeStream(result as StreamingResult)).toEqual([]);
+  });
+
+  test("creates a thread, persists the user message, and streams responder events", async () => {
+    const attachmentStore = new TestAttachmentStore();
+    const responderCalls: Array<{ thread: ThreadMetadata; item: UserMessageItem | null }> = [];
+    const server = new TestServer(
+      async function* (thread, inputUserMessage) {
+        responderCalls.push({ thread: structuredClone(thread), item: structuredClone(inputUserMessage) });
+        yield {
+          type: "thread.item.done",
+          item: {
+            id: "msg_assistant",
+            type: "assistant_message",
+            thread_id: thread.id,
+            created_at: "2026-05-27T00:00:02.000Z",
+            content: [{ type: "output_text", text: "Hi there", annotations: [] }],
+          },
+        };
+      },
+      undefined,
+      attachmentStore,
+    );
+    await server.store.saveAttachment(
+      {
+        id: "atc_existing",
+        type: "file",
+        name: "notes.txt",
+        mime_type: "text/plain",
+        upload_descriptor: { url: "https://example.com/upload", method: "PUT", headers: {} },
+        metadata: { source: "test" },
+      },
+      defaultContext,
+    );
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.create",
+        params: {
+          input: {
+            content: [{ type: "input_text", text: "Hello" }],
+            attachments: ["atc_existing"],
+            inference_options: { model: "gpt-test" },
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.map((event) => event.type)).toEqual([
+      "thread.created",
+      "thread.item.done",
+      "stream_options",
+      "thread.item.done",
+    ]);
+    expect(events[0]).toMatchObject({ type: "thread.created", thread: { status: { type: "active" } } });
+    const userMessageEvent = events[1];
+    expect(userMessageEvent).toMatchObject({
+      type: "thread.item.done",
+      item: {
+        type: "user_message",
+        content: [{ type: "input_text", text: "Hello" }],
+        attachments: [{ id: "atc_existing" }],
+        inference_options: { model: "gpt-test" },
+      },
+    });
+    expect(responderCalls).toHaveLength(1);
+    const responderCall = responderCalls[0];
+    expect(responderCall).toBeDefined();
+    if (!responderCall) {
+      throw new Error("Expected the responder to be called");
+    }
+    expect(responderCall.item).toMatchObject({
+      type: "user_message",
+      attachments: [{ id: "atc_existing", thread_id: responderCall.thread.id }],
+    });
+
+    const threadId = responderCall.thread.id;
+    const persistedItems = await server.store.loadThreadItems(threadId, null, 10, "asc", defaultContext);
+    expect(persistedItems.data.map((item) => item.type).sort()).toEqual([
+      "assistant_message",
+      "user_message",
+    ]);
+    expect(persistedItems.data.find((item) => item.type === "user_message")).toMatchObject({
+      type: "user_message",
+      thread_id: threadId,
+      attachments: [{ id: "atc_existing", thread_id: threadId }],
+    });
+    await expect(server.store.loadAttachment("atc_existing", defaultContext)).resolves.toMatchObject({
+      id: "atc_existing",
+      thread_id: threadId,
+    });
+  });
+
+  test("adds a user message to an existing thread and sends it to the responder", async () => {
+    const captured: Array<UserMessageItem | null> = [];
+    const server = new TestServer(async function* (_thread, inputUserMessage) {
+      captured.push(structuredClone(inputUserMessage));
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Second turn" }],
+            attachments: [],
+            quoted_text: "Earlier text",
+            inference_options: { model: "gpt-test" },
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.map((event) => event.type)).toEqual(["thread.item.done", "stream_options"]);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toMatchObject({
+      type: "user_message",
+      thread_id: thread.id,
+      content: [{ type: "input_text", text: "Second turn" }],
+      quoted_text: "Earlier text",
+      inference_options: { model: "gpt-test" },
+    });
+
+    const persistedItems = await server.store.loadThreadItems(thread.id, null, 10, "asc", defaultContext);
+    expect(persistedItems.data).toHaveLength(1);
+    expect(persistedItems.data[0]).toMatchObject(captured[0] as UserMessageItem);
+  });
+
+  test("persists responder thread mutations and emits thread updated events", async () => {
+    const server = new TestServer(async function* (thread) {
+      thread.title = "Renamed thread";
+      thread.metadata = { topic: "support", priority: 1 };
+      yield { type: "progress_update", text: "renamed" };
+
+      thread.status = { type: "locked", reason: "waiting" };
+      thread.allowed_image_domains = ["example.com"];
+      yield { type: "progress_update", text: "locked" };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Mutate thread" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.map((event) => event.type)).toEqual([
+      "thread.item.done",
+      "stream_options",
+      "progress_update",
+      "thread.updated",
+      "progress_update",
+      "thread.updated",
+    ]);
+    expect(events[3]).toMatchObject({
+      type: "thread.updated",
+      thread: {
+        id: thread.id,
+        title: "Renamed thread",
+        status: { type: "active" },
+      },
+    });
+    expect(events[5]).toMatchObject({
+      type: "thread.updated",
+      thread: {
+        id: thread.id,
+        title: "Renamed thread",
+        status: { type: "locked", reason: "waiting" },
+        allowed_image_domains: ["example.com"],
+      },
+    });
+
+    await expect(server.store.loadThread(thread.id, defaultContext)).resolves.toEqual({
+      ...thread,
+      title: "Renamed thread",
+      status: { type: "locked", reason: "waiting" },
+      allowed_image_domains: ["example.com"],
+      metadata: { topic: "support", priority: 1 },
+    });
   });
 
   test("rejects default transcription requests", async () => {

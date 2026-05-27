@@ -1,11 +1,12 @@
 import { UnsupportedOperationError, ValidationError } from "./errors";
 import { decodeJsonBytes, encodeJsonBytes } from "./serialization";
 import type { AttachmentStore, Store } from "./store";
-import type { Page, ThreadItem, ThreadMetadata } from "./types/core";
+import { ThreadMetadataSchema, type Page, type ThreadItem, type ThreadMetadata } from "./types/core";
 import {
   ChatKitRequestSchema,
   DEFAULT_PAGE_SIZE,
   SyncCustomActionResponseSchema,
+  ThreadStreamEventSchema,
   TranscriptionResultSchema,
   isStreamingRequest,
   type AudioInput,
@@ -17,8 +18,10 @@ import {
   type SyncCustomActionResponse,
   type Thread,
   type ThreadCustomActionParams,
+  type ThreadItemUpdate,
   type ThreadStreamEvent,
   type TranscriptionResult,
+  type UserMessageInput,
 } from "./types/server";
 
 const sseEncoder = new TextEncoder();
@@ -80,7 +83,7 @@ export abstract class ChatKitServer<TContext = unknown> {
     );
   }
 
-  getStreamOptions(_request: StreamingRequest, _context: TContext): StreamOptions {
+  getStreamOptions(_thread: ThreadMetadata, _context: TContext): StreamOptions {
     return { allow_cancel: true };
   }
 
@@ -228,9 +231,190 @@ export abstract class ChatKitServer<TContext = unknown> {
   }
 
   protected async *processStreamingImpl(
-    _request: StreamingRequest,
+    request: StreamingRequest,
+    context: TContext,
+  ): AsyncIterable<ThreadStreamEvent> {
+    switch (request.type) {
+      case "threads.create": {
+        const thread: Thread = {
+          id: this.store.generateThreadId(context),
+          created_at: new Date().toISOString(),
+          status: { type: "active" },
+          metadata: {},
+          items: { data: [], has_more: false, after: null },
+        };
+        await this.store.saveThread(ThreadMetadataSchema.parse(thread), context);
+        yield { type: "thread.created", thread: this.toThreadResponse(thread) };
+
+        const userMessage = await this.buildUserMessageItem(request.params.input, thread, context);
+        yield* this.processNewThreadItemRespond(thread, userMessage, context);
+        return;
+      }
+
+      case "threads.add_user_message": {
+        const thread = await this.store.loadThread(request.params.thread_id, context);
+        const userMessage = await this.buildUserMessageItem(request.params.input, thread, context);
+        yield* this.processNewThreadItemRespond(thread, userMessage, context);
+        return;
+      }
+
+      default:
+        yield* this.processStreamingContinuation(request, context);
+    }
+  }
+
+  protected async buildUserMessageItem(
+    input: UserMessageInput,
+    thread: ThreadMetadata,
+    context: TContext,
+  ): Promise<UserMessageItem> {
+    return {
+      id: this.store.generateItemId("message", thread, context),
+      type: "user_message",
+      thread_id: thread.id,
+      created_at: new Date().toISOString(),
+      content: input.content,
+      attachments: await Promise.all(
+        input.attachments.map(async (attachmentId) => ({
+          ...(await this.store.loadAttachment(attachmentId, context)),
+          thread_id: thread.id,
+        })),
+      ),
+      quoted_text: input.quoted_text,
+      inference_options: input.inference_options,
+    };
+  }
+
+  protected async *processNewThreadItemRespond(
+    thread: ThreadMetadata,
+    item: UserMessageItem,
+    context: TContext,
+  ): AsyncIterable<ThreadStreamEvent> {
+    for (const attachment of item.attachments) {
+      await this.store.saveAttachment(attachment, context);
+    }
+
+    await this.store.addThreadItem(thread.id, item, context);
+    yield { type: "thread.item.done", item };
+    yield* this.processEvents(thread, context, () => this.respond(thread, item, context));
+  }
+
+  protected async *processStreamingContinuation(
+    _request: Exclude<StreamingRequest, { type: "threads.create" | "threads.add_user_message" }>,
     _context: TContext,
   ): AsyncIterable<ThreadStreamEvent> {}
+
+  protected async *processEvents(
+    thread: ThreadMetadata,
+    context: TContext,
+    stream: () => AsyncIterable<ThreadStreamEvent>,
+  ): AsyncIterable<ThreadStreamEvent> {
+    yield { type: "stream_options", stream_options: this.getStreamOptions(thread, context) };
+    let lastThread = structuredClone(thread);
+    const pendingItems = new Map<string, ThreadItem>();
+
+    try {
+      for await (const rawEvent of stream()) {
+        const event = ThreadStreamEventSchema.parse(rawEvent);
+
+        if (event.type === "thread.item.added") {
+          pendingItems.set(event.item.id, structuredClone(event.item));
+        } else if (event.type === "thread.item.done") {
+          await this.store.addThreadItem(thread.id, event.item, context);
+          pendingItems.delete(event.item.id);
+        } else if (event.type === "thread.item.removed") {
+          await this.store.deleteThreadItem(thread.id, event.item_id, context);
+          pendingItems.delete(event.item_id);
+        } else if (event.type === "thread.item.replaced") {
+          await this.store.saveItem(thread.id, event.item, context);
+          pendingItems.delete(event.item.id);
+        } else if (event.type === "thread.item.updated") {
+          this.updatePendingItems(pendingItems, event.item_id, event.update);
+        }
+
+        if (!(event.type === "thread.item.done" && this.isHiddenItem(event.item))) {
+          yield event;
+        }
+
+        if (this.hasThreadChanged(thread, lastThread)) {
+          lastThread = structuredClone(thread);
+          await this.store.saveThread(thread, context);
+          yield { type: "thread.updated", thread: this.toThreadResponse(thread) };
+        }
+      }
+    } catch (_error) {
+      yield { type: "error", code: "stream.error", allow_retry: true };
+    }
+
+    if (this.hasThreadChanged(thread, lastThread)) {
+      await this.store.saveThread(thread, context);
+      yield { type: "thread.updated", thread: this.toThreadResponse(thread) };
+    }
+  }
+
+  protected updatePendingItems(
+    pendingItems: Map<string, ThreadItem>,
+    itemId: string,
+    update: ThreadItemUpdate,
+  ): void {
+    const item = pendingItems.get(itemId);
+    if (!item) {
+      return;
+    }
+
+    if (
+      item.type === "assistant_message" &&
+      (update.type === "assistant_message.content_part.added" ||
+        update.type === "assistant_message.content_part.text_delta" ||
+        update.type === "assistant_message.content_part.annotation_added" ||
+        update.type === "assistant_message.content_part.done")
+    ) {
+      pendingItems.set(itemId, this.applyAssistantMessageUpdate(item, update));
+    } else if (item.type === "workflow" && update.type === "workflow.task.added") {
+      item.workflow.tasks.splice(update.task_index, 0, update.task);
+      pendingItems.set(itemId, item);
+    } else if (item.type === "workflow" && update.type === "workflow.task.updated") {
+      item.workflow.tasks[update.task_index] = update.task;
+      pendingItems.set(itemId, item);
+    }
+  }
+
+  protected applyAssistantMessageUpdate(
+    item: AssistantMessageItem,
+    update: Extract<ThreadItemUpdate, { type: `assistant_message.${string}` }>,
+  ): AssistantMessageItem {
+    const content = item.content.map((part) => ({ ...part, annotations: [...part.annotations] }));
+
+    while (content.length <= update.content_index) {
+      content.push({ type: "output_text", text: "", annotations: [] });
+    }
+
+    const current = content[update.content_index];
+    if (!current) {
+      return { ...item, content };
+    }
+
+    if (update.type === "assistant_message.content_part.added") {
+      content[update.content_index] = update.content;
+    } else if (update.type === "assistant_message.content_part.text_delta") {
+      content[update.content_index] = {
+        ...current,
+        text: current.text + update.delta,
+      };
+    } else if (update.type === "assistant_message.content_part.annotation_added") {
+      const annotations = [...current.annotations];
+      annotations.splice(update.annotation_index, 0, update.annotation);
+      content[update.content_index] = { ...current, annotations };
+    } else if (update.type === "assistant_message.content_part.done") {
+      content[update.content_index] = update.content;
+    }
+
+    return { ...item, content };
+  }
+
+  private hasThreadChanged(thread: ThreadMetadata, lastThread: ThreadMetadata): boolean {
+    return JSON.stringify(thread) !== JSON.stringify(lastThread);
+  }
 
   protected serialize(value: unknown): Uint8Array {
     return encodeJsonBytes(value);
