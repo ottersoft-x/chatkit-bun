@@ -17,15 +17,23 @@ describe("package metadata", () => {
   });
 
   test("declares only the required runtime and development dependencies", () => {
-    expect(Object.keys(packageJson.dependencies ?? {})).toEqual(["zod"]);
+    expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual([
+      "nunjucks",
+      "zod",
+    ]);
     expect(Object.keys(packageJson.devDependencies ?? {}).sort()).toEqual([
       "@types/bun",
+      "@types/nunjucks",
       "typescript",
     ]);
     expect(packageJson.peerDependencies).toEqual({ typescript: "^5" });
 
+    expect(typeof packageJson.dependencies?.nunjucks).toBe("string");
     expect(typeof packageJson.dependencies?.zod).toBe("string");
     expect(typeof packageJson.devDependencies?.["@types/bun"]).toBe("string");
+    expect(typeof packageJson.devDependencies?.["@types/nunjucks"]).toBe(
+      "string",
+    );
     expect(typeof packageJson.devDependencies?.typescript).toBe("string");
     expect(typeof packageJson.peerDependencies?.typescript).toBe("string");
   });
