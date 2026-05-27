@@ -106,7 +106,36 @@ function parseRenderedTemplate(rendered: string, name: string): unknown {
 }
 
 function renderableTemplate(source: string): string {
-  return source.replace(/\b([A-Za-z_$][\w$]*)\[(\d+):\]/g, "$1.slice($2)");
+  let output = "";
+  let index = 0;
+
+  while (index < source.length) {
+    const expressionStart = source.indexOf("{{", index);
+    const blockStart = source.indexOf("{%", index);
+    const starts = [expressionStart, blockStart].filter((start) => start !== -1);
+    if (starts.length === 0) {
+      output += source.slice(index);
+      break;
+    }
+
+    const tagStart = Math.min(...starts);
+    const tagEndMarker = tagStart === expressionStart ? "}}" : "%}";
+    const tagEnd = source.indexOf(tagEndMarker, tagStart + 2);
+    if (tagEnd === -1) {
+      output += source.slice(index);
+      break;
+    }
+
+    const tagCloseEnd = tagEnd + tagEndMarker.length;
+    const tag = source
+      .slice(tagStart, tagCloseEnd)
+      .replace(/\b([A-Za-z_$][\w$]*)\[(\d+):\]/g, "$1.slice($2)");
+
+    output += source.slice(index, tagStart) + tag;
+    index = tagCloseEnd;
+  }
+
+  return output;
 }
 
 export class WidgetTemplate {

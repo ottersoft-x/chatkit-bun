@@ -206,4 +206,17 @@ describe("widgets", () => {
 
     expect(() => template.build({ name: "Hermione Granger" })).toThrow();
   });
+
+  test("preserves literal string content that looks like slice syntax", () => {
+    const template = new WidgetTemplate({
+      version: "1.0",
+      name: "literal",
+      template: '{"type":"Card","children":[{"type":"Text","value":"abc[1:]"}]}',
+    });
+
+    expect(template.build()).toEqual({
+      type: "Card",
+      children: [{ type: "Text", value: "abc[1:]" }],
+    });
+  });
 });
