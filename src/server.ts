@@ -529,6 +529,8 @@ export abstract class ChatKitServer<TContext = unknown> {
     let lastThread = structuredClone(thread);
     const pendingItems = new Map<string, ThreadItem>();
     const updatedPendingItemIds = new Set<string>();
+    let completedNormally = false;
+    let cancellationHandled = false;
 
     try {
       for await (const rawEvent of stream()) {
@@ -570,13 +572,20 @@ export abstract class ChatKitServer<TContext = unknown> {
           yield { type: "thread.updated", thread: this.toThreadResponse(thread) };
         }
       }
+      completedNormally = true;
     } catch (error) {
       if (error instanceof StreamCancelledError) {
+        cancellationHandled = true;
         await this.handleStreamCancelled(thread, [...pendingItems.values()], context);
         throw error;
       }
 
+      completedNormally = true;
       yield { type: "error", code: "stream.error", allow_retry: true };
+    } finally {
+      if (!completedNormally && !cancellationHandled) {
+        await this.handleStreamCancelled(thread, [...pendingItems.values()], context);
+      }
     }
 
     if (this.hasThreadChanged(thread, lastThread)) {
