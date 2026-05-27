@@ -175,6 +175,7 @@ export abstract class ChatKitServer<TContext = unknown> {
 
       case "attachments.delete": {
         const { attachment_id } = request.params;
+        await this.store.loadAttachment(attachment_id, context);
         await this.getAttachmentStore().deleteAttachment(attachment_id, context);
         await this.store.deleteAttachment(attachment_id, context);
         return this.serialize({});

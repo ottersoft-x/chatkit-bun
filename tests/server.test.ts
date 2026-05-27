@@ -376,6 +376,23 @@ describe("ChatKitServer", () => {
     );
   });
 
+  test("does not delete external attachments when local metadata is missing", async () => {
+    const attachmentStore = new TestAttachmentStore();
+    const server = new TestServer(emptyResponse, undefined, attachmentStore);
+
+    await expect(
+      server.process(
+        JSON.stringify({
+          type: "attachments.delete",
+          params: { attachment_id: "atc_missing" },
+          metadata: {},
+        }),
+        defaultContext,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundError);
+    expect(attachmentStore.deleted).toEqual([]);
+  });
+
   test("rejects attachment creation without an attachment store", async () => {
     const server = new TestServer();
 
