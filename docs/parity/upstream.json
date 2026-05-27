@@ -1,0 +1,6 @@
+{
+  "packageName": "openai-chatkit",
+  "version": "1.6.5",
+  "submodulePath": "packages/chatkit-python",
+  "commit": "dacc133c280b39b9334d06ea73f0f1c199e59927"
+}
