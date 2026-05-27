@@ -75,6 +75,27 @@ describe("SQLiteStore", () => {
     expect(second.after).toBeNull();
   });
 
+  test("rejects non-positive thread pagination limits", async () => {
+    const store = new SQLiteStore<RequestContext>({ path: ":memory:", getUserId: (context) => context.user_id });
+
+    await expect(store.loadThreads(0, null, "asc", defaultContext)).rejects.toBeInstanceOf(RangeError);
+    await expect(store.loadThreads(-1, null, "asc", defaultContext)).rejects.toBeInstanceOf(RangeError);
+  });
+
+  test("updates thread metadata without deleting items", async () => {
+    const store = new SQLiteStore<RequestContext>({ path: ":memory:", getUserId: (context) => context.user_id });
+    const thread = makeThread();
+    const item = makeMessage();
+    await store.saveThread(thread, defaultContext);
+    await store.addThreadItem(thread.id, item, defaultContext);
+
+    const updatedThread: ThreadMetadata = { ...thread, title: "Updated Thread" };
+    await store.saveThread(updatedThread, defaultContext);
+
+    expect(await store.loadThread(thread.id, defaultContext)).toEqual(updatedThread);
+    expect((await store.loadThreadItems(thread.id, null, 10, "asc", defaultContext)).data).toEqual([item]);
+  });
+
   test("saves, loads, updates, and deletes thread items", async () => {
     const store = new SQLiteStore<RequestContext>({ path: ":memory:", getUserId: (context) => context.user_id });
     const thread = makeThread();
@@ -93,6 +114,35 @@ describe("SQLiteStore", () => {
 
     await store.deleteThreadItem(thread.id, item.id, defaultContext);
     await expect(store.loadItem(thread.id, item.id, defaultContext)).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  test("saveItem inserts new items for existing threads", async () => {
+    const store = new SQLiteStore<RequestContext>({ path: ":memory:", getUserId: (context) => context.user_id });
+    const thread = makeThread();
+    const item = makeMessage();
+    await store.saveThread(thread, defaultContext);
+
+    await store.saveItem(thread.id, item, defaultContext);
+
+    expect(await store.loadItem(thread.id, item.id, defaultContext)).toEqual(item);
+    expect((await store.loadThreadItems(thread.id, null, 10, "asc", defaultContext)).data).toEqual([item]);
+  });
+
+  test("rejects non-positive item pagination limits", async () => {
+    const store = new SQLiteStore<RequestContext>({ path: ":memory:", getUserId: (context) => context.user_id });
+    const thread = makeThread();
+    await store.saveThread(thread, defaultContext);
+
+    await expect(store.loadThreadItems(thread.id, null, 0, "asc", defaultContext)).rejects.toBeInstanceOf(RangeError);
+    await expect(store.loadThreadItems(thread.id, null, -1, "asc", defaultContext)).rejects.toBeInstanceOf(RangeError);
+  });
+
+  test("closes the sqlite database", async () => {
+    const store = new SQLiteStore<RequestContext>({ path: ":memory:", getUserId: (context) => context.user_id });
+    await store.saveThread(makeThread(), defaultContext);
+
+    expect(typeof store.close).toBe("function");
+    store.close();
   });
 
   test("upserts, loads, and deletes attachments", async () => {

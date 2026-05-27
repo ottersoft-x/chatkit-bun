@@ -39,6 +39,10 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     this.createSchema();
   }
 
+  close(): void {
+    this.db.close();
+  }
+
   async loadThread(threadId: string, context: TContext): Promise<ThreadMetadata> {
     const row = this.threadRow(this.userId(context), threadId);
     return this.parseThread(row.data);
@@ -50,8 +54,11 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
 
     this.db
       .query(
-        `INSERT OR REPLACE INTO threads (user_id, id, created_at, data)
-         VALUES (?, ?, ?, ?)`,
+        `INSERT INTO threads (user_id, id, created_at, data)
+         VALUES (?, ?, ?, ?)
+         ON CONFLICT(user_id, id) DO UPDATE SET
+           created_at = excluded.created_at,
+           data = excluded.data`,
       )
       .run(userId, parsed.id, parsed.created_at, JSON.stringify(parsed));
   }
@@ -62,6 +69,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     order: "asc" | "desc",
     context: TContext,
   ): Promise<Page<ThreadMetadata>> {
+    this.assertPositiveLimit(limit);
     const userId = this.userId(context);
     const rows = after
       ? this.threadRowsAfter(userId, after, limit, order)
@@ -86,16 +94,17 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   async saveItem(threadId: string, item: ThreadItem, context: TContext): Promise<void> {
     const userId = this.userId(context);
     this.threadRow(userId, threadId);
-    this.itemRow(userId, threadId, item.id);
     const parsed = ThreadItemSchema.parse({ ...item, thread_id: threadId });
 
     this.db
       .query(
-        `UPDATE items
-         SET created_at = ?, data = ?
-         WHERE user_id = ? AND thread_id = ? AND id = ?`,
+        `INSERT INTO items (user_id, thread_id, id, created_at, data)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(user_id, thread_id, id) DO UPDATE SET
+           created_at = excluded.created_at,
+           data = excluded.data`,
       )
-      .run(parsed.created_at, JSON.stringify(parsed), userId, threadId, parsed.id);
+      .run(userId, threadId, parsed.id, parsed.created_at, JSON.stringify(parsed));
   }
 
   async loadItem(threadId: string, itemId: string, context: TContext): Promise<ThreadItem> {
@@ -112,6 +121,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     order: "asc" | "desc",
     context: TContext,
   ): Promise<Page<ThreadItem>> {
+    this.assertPositiveLimit(limit);
     const userId = this.userId(context);
     this.threadRow(userId, threadId);
     const rows = after
@@ -360,6 +370,12 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
 
   private requestedLimit(limit: number): number {
     return Math.max(0, Math.trunc(limit));
+  }
+
+  private assertPositiveLimit(limit: number): void {
+    if (!Number.isFinite(limit) || limit < 1) {
+      throw new RangeError("Pagination limit must be at least 1");
+    }
   }
 
   private queryLimit(limit: number): number {
