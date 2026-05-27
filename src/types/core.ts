@@ -140,7 +140,7 @@ export type ToolChoice = z.infer<typeof ToolChoiceSchema>;
 export const InferenceOptionsSchema = z.object({
   tool_choice: ToolChoiceSchema.nullable().optional(),
   model: z.string().nullable().optional(),
-});
+}).catchall(z.unknown());
 export type InferenceOptions = z.infer<typeof InferenceOptionsSchema>;
 
 const BaseTaskSchema = z.object({

@@ -142,6 +142,29 @@ describe("core schemas", () => {
     expect(assistant.text).toBe("Hi");
   });
 
+  test("preserves arbitrary user message inference options", () => {
+    const inference_options = {
+      model: "gpt-4.1",
+      temperature: 0.2,
+      metadata: { trace_id: "trace_1" },
+      runtime: "server",
+    };
+
+    const item = ThreadItemSchema.parse({
+      id: "msg_1",
+      type: "user_message",
+      thread_id: "thr_1",
+      created_at: "2026-05-27T00:00:00.000Z",
+      content: [{ type: "input_text", text: "Hello" }],
+      inference_options,
+    });
+
+    if (item.type !== "user_message") {
+      throw new Error(`Expected user_message item, got ${item.type}`);
+    }
+    expect(item.inference_options).toEqual(inference_options);
+  });
+
   test("parses structured input, generated image, task, and workflow items", () => {
     const created_at = "2026-05-27T00:00:00.000Z";
     expect(
