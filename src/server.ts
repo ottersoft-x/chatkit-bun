@@ -111,7 +111,8 @@ export abstract class ChatKitServer<TContext = unknown> {
     context: TContext,
   ): Promise<void> {
     const messagesToSave = pendingItems.filter(
-      (item): item is AssistantMessageItem => item.type === "assistant_message" && item.content.length > 0,
+      (item): item is AssistantMessageItem =>
+        item.type === "assistant_message" && item.content.some((part) => part.text.trim().length > 0),
     );
 
     for (const message of messagesToSave) {

@@ -1444,6 +1444,54 @@ describe("ChatKitServer", () => {
     expect(items.data.some((item) => item.type === "sdk_hidden_context")).toBe(true);
   });
 
+  test("persists a cancellation marker without blank-text pending assistant messages on stream cancellation", async () => {
+    const server = new TestServer(async function* (thread) {
+      yield {
+        type: "thread.item.added",
+        item: {
+          ...makeAssistantMessage(""),
+          id: "msg_blank_pending",
+          thread_id: thread.id,
+          content: [{ type: "output_text", text: "", annotations: [] }],
+        },
+      };
+      yield {
+        type: "thread.item.added",
+        item: {
+          ...makeAssistantMessage(""),
+          id: "msg_whitespace_pending",
+          thread_id: thread.id,
+          content: [{ type: "output_text", text: " \n\t", annotations: [] }],
+        },
+      };
+      throw new StreamCancelledError();
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Start" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    await expect(decodeStream(result)).rejects.toBeInstanceOf(StreamCancelledError);
+    const items = await server.store.loadThreadItems(thread.id, null, 10, "asc", defaultContext);
+    expect(items.data.some((item) => item.id === "msg_blank_pending")).toBe(false);
+    expect(items.data.some((item) => item.id === "msg_whitespace_pending")).toBe(false);
+    expect(items.data.some((item) => item.type === "sdk_hidden_context")).toBe(true);
+  });
+
   test("persists pending assistant state when the stream iterator is closed by the client", async () => {
     const server = new TestServer(async function* (thread) {
       const assistant = { ...makeAssistantMessage(""), id: "msg_iterator_pending", thread_id: thread.id };
