@@ -541,6 +541,15 @@ export abstract class ChatKitServer<TContext = unknown> {
     const updatedPendingItemIds = new Set<string>();
     let completedNormally = false;
     let cancellationHandled = false;
+    const saveThreadIfChanged = async (): Promise<boolean> => {
+      if (!this.hasThreadChanged(thread, lastThread)) {
+        return false;
+      }
+
+      lastThread = structuredClone(thread);
+      await this.store.saveThread(thread, context);
+      return true;
+    };
 
     try {
       for await (const rawEvent of stream()) {
@@ -595,9 +604,7 @@ export abstract class ChatKitServer<TContext = unknown> {
           yield event;
         }
 
-        if (this.hasThreadChanged(thread, lastThread)) {
-          lastThread = structuredClone(thread);
-          await this.store.saveThread(thread, context);
+        if (await saveThreadIfChanged()) {
           yield { type: "thread.updated", thread: this.toThreadResponse(thread) };
         }
       }
@@ -605,6 +612,7 @@ export abstract class ChatKitServer<TContext = unknown> {
     } catch (error) {
       if (error instanceof StreamCancelledError) {
         cancellationHandled = true;
+        await saveThreadIfChanged();
         await this.handleStreamCancelled(thread, [...pendingItems.values()], context);
         throw error;
       }
@@ -613,12 +621,12 @@ export abstract class ChatKitServer<TContext = unknown> {
       yield { type: "error", code: "stream.error", allow_retry: true };
     } finally {
       if (!completedNormally && !cancellationHandled) {
+        await saveThreadIfChanged();
         await this.handleStreamCancelled(thread, [...pendingItems.values()], context);
       }
     }
 
-    if (this.hasThreadChanged(thread, lastThread)) {
-      await this.store.saveThread(thread, context);
+    if (await saveThreadIfChanged()) {
       yield { type: "thread.updated", thread: this.toThreadResponse(thread) };
     }
   }

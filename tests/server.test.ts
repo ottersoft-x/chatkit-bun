@@ -804,6 +804,62 @@ describe("ChatKitServer", () => {
     });
   });
 
+  test("persists responder thread mutations when stream closes before thread updated event", async () => {
+    const server = new TestServer(async function* (thread) {
+      thread.title = "Closed after responder event";
+      thread.metadata = { topic: "support", priority: 2 };
+      yield { type: "progress_update", text: "renamed" };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Mutate then close" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const decoder = new TextDecoder();
+    const events: ThreadStreamEvent[] = [];
+
+    stream: for await (const chunk of result.jsonEvents) {
+      for (const frame of decoder.decode(chunk).split("\n\n")) {
+        if (!frame) {
+          continue;
+        }
+
+        const json = frame.startsWith("data: ") ? frame.slice("data: ".length) : frame;
+        const event = JSON.parse(json) as ThreadStreamEvent;
+        events.push(event);
+
+        if (event.type === "progress_update" && event.text === "renamed") {
+          break stream;
+        }
+      }
+    }
+
+    expect(events.map((event) => event.type)).toEqual([
+      "thread.item.done",
+      "stream_options",
+      "progress_update",
+    ]);
+    await expect(server.store.loadThread(thread.id, defaultContext)).resolves.toEqual({
+      ...thread,
+      title: "Closed after responder event",
+      metadata: { topic: "support", priority: 2 },
+    });
+  });
+
   test("adds client tool output and resumes the responder", async () => {
     const responderCalls: Array<UserMessageItem | null> = [];
     const server = new TestServer(async function* (thread, inputUserMessage) {
