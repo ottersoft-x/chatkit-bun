@@ -12,7 +12,12 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export function encodeJsonBytes(value: unknown): Uint8Array {
-  const json = JSON.stringify(omitUndefinedDeep(value));
+  let json: string | undefined;
+  try {
+    json = JSON.stringify(omitUndefinedDeep(value));
+  } catch (error) {
+    throw new ValidationError("Invalid JSON payload", error);
+  }
   if (typeof json !== "string") {
     throw new ValidationError("Invalid JSON payload");
   }

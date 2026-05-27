@@ -20,6 +20,35 @@ describe("serialization helpers", () => {
     expect(() => encodeJsonBytes(undefined)).toThrow(ValidationError);
   });
 
+  test("rejects BigInt JSON encoding as validation error", () => {
+    let thrown: unknown;
+    try {
+      encodeJsonBytes(1n);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ValidationError);
+    expect((thrown as ValidationError).message).toBe("Invalid JSON payload");
+    expect((thrown as ValidationError).cause).toBeInstanceOf(Error);
+  });
+
+  test("rejects circular JSON encoding as validation error", () => {
+    const value: Record<string, unknown> = {};
+    value.self = value;
+
+    let thrown: unknown;
+    try {
+      encodeJsonBytes(value);
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ValidationError);
+    expect((thrown as ValidationError).message).toBe("Invalid JSON payload");
+    expect((thrown as ValidationError).cause).toBeInstanceOf(Error);
+  });
+
   test("rejects malformed UTF-8 bytes before JSON parsing", () => {
     expect(() => decodeJsonBytes(new Uint8Array([0x22, 0xff, 0x22]))).toThrow(ValidationError);
   });
