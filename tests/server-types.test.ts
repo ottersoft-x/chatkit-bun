@@ -100,14 +100,40 @@ describe("server request schemas", () => {
     expect(
       ThreadStreamEventSchema.parse({
         type: "error",
-        code: "stream_error",
+        code: "stream.error",
         allow_retry: true,
       }),
     ).toEqual({
       type: "error",
-      code: "stream_error",
+      code: "stream.error",
       allow_retry: true,
     });
+
+    expect(() =>
+      ThreadStreamEventSchema.parse({
+        type: "error",
+        code: "stream_error",
+        allow_retry: true,
+      }),
+    ).toThrow();
+  });
+
+  test("parses attachment delete requests with attachment id only", () => {
+    expect(
+      ChatKitRequestSchema.parse({
+        type: "attachments.delete",
+        params: { attachment_id: "att_1" },
+        metadata: {},
+      }).params,
+    ).toEqual({ attachment_id: "att_1" });
+
+    expect(
+      ChatKitRequestSchema.parse({
+        type: "attachments.delete",
+        params: { attachment_id: "att_1", thread_id: "thr_1" },
+        metadata: {},
+      }).params,
+    ).toEqual({ attachment_id: "att_1" });
   });
 
   test("parses sync custom action response updated items", () => {

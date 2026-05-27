@@ -117,7 +117,6 @@ const AttachmentsCreateParamsSchema = z.object({
 
 const AttachmentsDeleteParamsSchema = z.object({
   attachment_id: z.string(),
-  thread_id: z.string().nullable().optional(),
 });
 
 const ThreadsUpdateParamsSchema = ThreadIdParamsSchema.extend({
@@ -362,7 +361,7 @@ export const ClientEffectEventSchema = z.object({
 
 export const ErrorEventSchema = z.object({
   type: z.literal("error"),
-  code: z.enum(["stream_error", "custom"]).default("custom"),
+  code: z.enum(["stream.error", "custom"]).default("custom"),
   message: z.string().nullable().optional(),
   allow_retry: z.boolean().default(false),
 });
