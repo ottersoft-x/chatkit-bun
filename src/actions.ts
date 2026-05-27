@@ -31,11 +31,9 @@ export function createActionConfig(
   payload?: unknown,
   options: CreateActionOptions = {},
 ): ActionConfig {
-  return {
+  return ActionConfigSchema.parse({
     type,
     payload,
-    handler: options.handler ?? "server",
-    loadingBehavior: options.loadingBehavior ?? "auto",
-    streaming: options.streaming ?? true,
-  };
+    ...options,
+  });
 }

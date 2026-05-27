@@ -29,6 +29,12 @@ describe("actions", () => {
     });
   });
 
+  test("rejects invalid runtime action helper options", () => {
+    expect(() =>
+      createActionConfig("copy", undefined, { handler: "browser" } as any),
+    ).toThrow();
+  });
+
   test("validates action config wire shape", () => {
     expect(() =>
       ActionConfigSchema.parse({
