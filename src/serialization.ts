@@ -1,7 +1,7 @@
 import { ValidationError } from "./errors";
 
 const encoder = new TextEncoder();
-const decoder = new TextDecoder();
+const decoder = new TextDecoder("utf-8", { fatal: true });
 
 export type JsonValue =
   | string
@@ -12,16 +12,25 @@ export type JsonValue =
   | { [key: string]: JsonValue };
 
 export function encodeJsonBytes(value: unknown): Uint8Array {
-  return encoder.encode(JSON.stringify(omitUndefinedDeep(value)));
+  const json = JSON.stringify(omitUndefinedDeep(value));
+  if (typeof json !== "string") {
+    throw new ValidationError("Invalid JSON payload");
+  }
+  return encoder.encode(json);
 }
 
 export function decodeJsonBytes(input: string | Uint8Array | ArrayBuffer): unknown {
-  const text =
-    typeof input === "string"
-      ? input
-      : input instanceof Uint8Array
-        ? decoder.decode(input)
-        : decoder.decode(new Uint8Array(input));
+  let text: string;
+  try {
+    text =
+      typeof input === "string"
+        ? input
+        : input instanceof Uint8Array
+          ? decoder.decode(input)
+          : decoder.decode(new Uint8Array(input));
+  } catch (error) {
+    throw new ValidationError("Invalid JSON payload", error);
+  }
 
   try {
     return JSON.parse(text);

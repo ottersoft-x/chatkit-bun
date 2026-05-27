@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { NotFoundError, UnsupportedOperationError } from "../src/errors";
+import { NotFoundError, UnsupportedOperationError, ValidationError } from "../src/errors";
 import {
   decodeJsonBytes,
   encodeJsonBytes,
@@ -14,6 +14,14 @@ describe("serialization helpers", () => {
     const bytes = encodeJsonBytes({ type: "example", value: 1 });
     expect(bytes).toBeInstanceOf(Uint8Array);
     expect(decodeJsonBytes(bytes)).toEqual({ type: "example", value: 1 });
+  });
+
+  test("rejects top-level undefined during JSON encoding", () => {
+    expect(() => encodeJsonBytes(undefined)).toThrow(ValidationError);
+  });
+
+  test("rejects malformed UTF-8 bytes before JSON parsing", () => {
+    expect(() => decodeJsonBytes(new Uint8Array([0x22, 0xff, 0x22]))).toThrow(ValidationError);
   });
 
   test("omits undefined recursively but preserves null", () => {
