@@ -27,7 +27,6 @@ const sseDecoder = new TextDecoder();
 type UserMessageItem = Extract<ThreadItem, { type: "user_message" }>;
 type AssistantMessageItem = Extract<ThreadItem, { type: "assistant_message" }>;
 type ProcessRequestInput = string | Uint8Array | ArrayBuffer;
-type RuntimeAudioInput = AudioInput & { readonly mediaType: string };
 
 export class StreamingResult implements AsyncIterable<Uint8Array> {
   constructor(readonly jsonEvents: AsyncIterable<Uint8Array>) {}
@@ -195,7 +194,7 @@ export abstract class ChatKitServer<TContext = unknown> {
 
       case "input.transcribe": {
         const { audio_base64, mime_type } = request.params;
-        const audio: RuntimeAudioInput = {
+        const audio: AudioInput = {
           data: Uint8Array.from(Buffer.from(audio_base64, "base64")),
           mime_type,
           get mediaType() {

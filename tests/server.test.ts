@@ -29,7 +29,6 @@ type Transcriber = (
   audio: AudioInput,
   context: RequestContext,
 ) => Promise<TranscriptionResult>;
-type RuntimeAudioInput = AudioInput & { readonly mediaType: string };
 
 async function* emptyResponse(): AsyncIterable<ThreadStreamEvent> {}
 
@@ -394,9 +393,9 @@ describe("ChatKitServer", () => {
 
   test("transcribes base64 audio with a runtime media type", async () => {
     const bytes = new Uint8Array([1, 2, 3]);
-    const capturedAudio: { value?: RuntimeAudioInput } = {};
+    const capturedAudio: { value?: AudioInput } = {};
     const server = new TestServer(emptyResponse, async (audio) => {
-      capturedAudio.value = audio as RuntimeAudioInput;
+      capturedAudio.value = audio;
       return { text: "transcribed text" };
     });
 
@@ -444,7 +443,10 @@ describe("ChatKitServer", () => {
     const server = new TestServer();
 
     await expect(
-      server.transcribe({ data: new Uint8Array(), mime_type: "audio/webm" }, defaultContext),
+      server.transcribe(
+        { data: new Uint8Array(), mime_type: "audio/webm", mediaType: "audio/webm" },
+        defaultContext,
+      ),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
   });
 

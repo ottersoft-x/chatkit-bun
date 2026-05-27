@@ -64,6 +64,7 @@ export type ThreadCustomActionParams = z.infer<typeof ThreadCustomActionParamsSc
 export const AudioInputSchema = z.object({
   data: z.instanceof(Uint8Array),
   mime_type: z.string(),
+  mediaType: z.string(),
 });
 export type AudioInput = z.infer<typeof AudioInputSchema>;
 
