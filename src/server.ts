@@ -86,9 +86,6 @@ export abstract class ChatKitServer<TContext = unknown> {
     context: TContext,
   ): Promise<void> {
     const messagesToSave = pendingAssistantMessages.filter((message) => message.content.length > 0);
-    if (messagesToSave.length === 0) {
-      return;
-    }
 
     for (const message of messagesToSave) {
       await this.store.saveItem(thread.id, message, context);

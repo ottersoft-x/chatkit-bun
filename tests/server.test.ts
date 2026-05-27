@@ -18,6 +18,7 @@ interface RequestContext {
 const defaultContext: RequestContext = { user_id: "user_1" };
 
 type UserMessageItem = Extract<ThreadItem, { type: "user_message" }>;
+type AssistantMessageItem = Extract<ThreadItem, { type: "assistant_message" }>;
 type Responder = (
   thread: ThreadMetadata,
   inputUserMessage: UserMessageItem | null,
@@ -29,6 +30,28 @@ type Transcriber = (
 ) => Promise<TranscriptionResult>;
 
 async function* emptyResponse(): AsyncIterable<ThreadStreamEvent> {}
+
+function makeThread(id = "thr_test"): ThreadMetadata {
+  return {
+    id,
+    created_at: "2026-05-27T00:00:00.000Z",
+    status: { type: "active" },
+    metadata: {},
+  };
+}
+
+function makeAssistantMessage(contentText: string): AssistantMessageItem {
+  return {
+    id: "msg_test",
+    type: "assistant_message",
+    thread_id: "thr_test",
+    created_at: "2026-05-27T00:00:01.000Z",
+    content:
+      contentText.length > 0
+        ? [{ type: "output_text", text: contentText, annotations: [] }]
+        : [],
+  };
+}
 
 class TestServer extends ChatKitServer<RequestContext> {
   readonly feedbackCalls: Array<{
@@ -133,5 +156,28 @@ describe("ChatKitServer", () => {
     await expect(
       server.transcribe({ data: new Uint8Array(), mime_type: "audio/webm" }, defaultContext),
     ).rejects.toBeInstanceOf(UnsupportedOperationError);
+  });
+
+  test("records cancellation marker without pending assistant messages", async () => {
+    const server = new TestServer();
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    await server.handleStreamCancelled(thread, [], defaultContext);
+
+    const items = await server.store.loadThreadItems(thread.id, null, 10, "asc", defaultContext);
+    expect(items.data.map((item) => item.type)).toEqual(["sdk_hidden_context"]);
+  });
+
+  test("records cancellation marker without saving empty pending assistant messages", async () => {
+    const server = new TestServer();
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    await server.handleStreamCancelled(thread, [makeAssistantMessage("")], defaultContext);
+
+    const items = await server.store.loadThreadItems(thread.id, null, 10, "asc", defaultContext);
+    expect(items.data.some((item) => item.type === "assistant_message")).toBe(false);
+    expect(items.data.some((item) => item.type === "sdk_hidden_context")).toBe(true);
   });
 });
