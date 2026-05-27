@@ -1,6 +1,9 @@
 # dependencies (bun install)
 node_modules
 
+# local implementation worktrees
+.worktrees/
+
 # output
 out
 dist
