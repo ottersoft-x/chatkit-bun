@@ -659,6 +659,9 @@ export abstract class ChatKitServer<TContext = unknown> {
       item.workflow.tasks[update.task_index] = update.task;
       pendingItems.set(itemId, item);
       return true;
+    } else if (item.type === "generated_image" && update.type === "generated_image.updated") {
+      pendingItems.set(itemId, { ...item, image: update.image });
+      return true;
     }
 
     return false;
@@ -685,6 +688,10 @@ export abstract class ChatKitServer<TContext = unknown> {
           tasks: pendingItem.workflow.tasks,
         },
       };
+    }
+
+    if (doneItem.type === "generated_image" && pendingItem.type === "generated_image") {
+      return doneItem.image ? doneItem : { ...doneItem, image: pendingItem.image };
     }
 
     return doneItem;

@@ -1892,6 +1892,126 @@ describe("ChatKitServer", () => {
     });
   });
 
+  test("persists generated image final state after partial updates", async () => {
+    const server = new TestServer(async function* (thread) {
+      const generatedImage = {
+        id: "msg_generated_image",
+        thread_id: thread.id,
+        created_at: "2026-05-27T00:00:02.000Z",
+        type: "generated_image" as const,
+        image: null,
+      };
+
+      yield { type: "thread.item.added", item: generatedImage };
+      yield {
+        type: "thread.item.updated",
+        item_id: generatedImage.id,
+        update: {
+          type: "generated_image.updated",
+          image: {
+            id: "img_call_1",
+            url: "data:image/png;base64,cGFydGlhbA==",
+          },
+          progress: 0.5,
+        },
+      };
+      yield {
+        type: "thread.item.done",
+        item: {
+          ...generatedImage,
+          image: {
+            id: "img_call_1",
+            url: "data:image/png;base64,ZmluYWw=",
+          },
+        },
+      };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Generate an image" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    await decodeStream(result);
+    await expect(server.store.loadItem(thread.id, "msg_generated_image", defaultContext)).resolves.toMatchObject({
+      type: "generated_image",
+      image: {
+        id: "img_call_1",
+        url: "data:image/png;base64,ZmluYWw=",
+      },
+    });
+  });
+
+  test("preserves pending generated image state when done item has no image", async () => {
+    const server = new TestServer(async function* (thread) {
+      const generatedImage = {
+        id: "msg_partial_image",
+        thread_id: thread.id,
+        created_at: "2026-05-27T00:00:02.000Z",
+        type: "generated_image" as const,
+        image: null,
+      };
+
+      yield { type: "thread.item.added", item: generatedImage };
+      yield {
+        type: "thread.item.updated",
+        item_id: generatedImage.id,
+        update: {
+          type: "generated_image.updated",
+          image: {
+            id: "img_call_1",
+            url: "data:image/png;base64,cGFydGlhbA==",
+          },
+          progress: 0.5,
+        },
+      };
+      yield {
+        type: "thread.item.done",
+        item: generatedImage,
+      };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Generate an image preview" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    await decodeStream(result);
+    await expect(server.store.loadItem(thread.id, "msg_partial_image", defaultContext)).resolves.toMatchObject({
+      type: "generated_image",
+      image: {
+        id: "img_call_1",
+        url: "data:image/png;base64,cGFydGlhbA==",
+      },
+    });
+  });
+
   test("keeps streamed assistant annotations when final content has none", async () => {
     const server = new TestServer(async function* (thread) {
       const assistant = { ...makeAssistantMessage(""), id: "msg_streamed_annotation", thread_id: thread.id };
