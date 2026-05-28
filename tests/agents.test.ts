@@ -666,6 +666,54 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("retains SDK tool metadata that arrives before the client tool call is recorded", async () => {
+    const agentContext = createContext(new ThrowingToolCallIdStore());
+    const completionGate = deferred();
+    const metadataConsumed = deferred();
+    const sdkEvents = {
+      async *[Symbol.asyncIterator](): AsyncIterator<unknown> {
+        yield {
+          type: "run_item_stream_event",
+          item: {
+            type: "tool_call_item",
+            raw_item: {
+              type: "function_call",
+              id: "fc_early",
+              call_id: "call_early",
+              name: "get_selection",
+            },
+          },
+        };
+        metadataConsumed.resolve();
+        await completionGate.promise;
+      },
+    };
+    const iterator = streamAgentResponse(agentContext, sdkEvents)[Symbol.asyncIterator]();
+    const next = iterator.next();
+
+    await metadataConsumed.promise;
+    agentContext.setClientToolCall(new ClientToolCall("get_selection"));
+    completionGate.resolve();
+
+    await expect(next).resolves.toEqual({
+      done: false,
+      value: {
+        type: "thread.item.done",
+        item: {
+          id: "fc_early",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "client_tool_call",
+          status: "pending",
+          call_id: "call_early",
+          name: "get_selection",
+          arguments: {},
+        },
+      },
+    });
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+  });
+
   test("does not let unrelated tool metadata override the recorded client tool call", async () => {
     const agentContext = createContext(new ThrowingToolCallIdStore());
     agentContext.setClientToolCall(new ClientToolCall("get_selection", { includeHtml: true }));

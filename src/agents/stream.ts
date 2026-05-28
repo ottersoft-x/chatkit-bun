@@ -22,6 +22,11 @@ interface TaggedNext<T> {
   result: TaggedNextResult<T> | null;
 }
 
+interface NamedToolCallMetadata {
+  name: string;
+  metadata: ToolCallMetadata;
+}
+
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
 }
@@ -174,11 +179,7 @@ function toolCallName(item: UnknownRecord, rawItem: UnknownRecord): string | nul
   );
 }
 
-function trackToolCallMetadata(event: unknown, expectedToolName: string | null): ToolCallMetadata | null {
-  if (!expectedToolName) {
-    return null;
-  }
-
+function toolCallMetadata(event: unknown): NamedToolCallMetadata | null {
   if (!isRecord(event) || event.type !== "run_item_stream_event" || !isRecord(event.item)) {
     return null;
   }
@@ -195,13 +196,18 @@ function trackToolCallMetadata(event: unknown, expectedToolName: string | null):
       ? item.rawItem
       : item;
 
-  if (toolCallName(item, rawItem) !== expectedToolName) {
+  const name = toolCallName(item, rawItem);
+
+  if (name === null) {
     return null;
   }
 
   return {
-    itemId: firstStringValue(rawItem.id, item.id),
-    callId: firstStringValue(rawItem.call_id, rawItem.callId, item.call_id, item.callId),
+    name,
+    metadata: {
+      itemId: firstStringValue(rawItem.id, item.id),
+      callId: firstStringValue(rawItem.call_id, rawItem.callId, item.call_id, item.callId),
+    },
   };
 }
 
@@ -382,7 +388,7 @@ function convertSdkEvent<TContext>(
 
 function pendingClientToolCallEvent<TContext>(
   context: AgentContext<TContext>,
-  metadata: ToolCallMetadata | null,
+  metadataByToolName: ReadonlyMap<string, ToolCallMetadata>,
 ): ThreadStreamEvent | null {
   const toolCall = context.getClientToolCall();
 
@@ -390,6 +396,7 @@ function pendingClientToolCallEvent<TContext>(
     return null;
   }
 
+  const metadata = metadataByToolName.get(toolCall.name) ?? null;
   const id =
     metadata?.itemId ?? context.store.generateItemId("tool_call", context.thread, context.context);
 
@@ -415,7 +422,7 @@ export async function* streamAgentResponse<TContext>(
   const sdkIterator = normalizeStream(streamedRun)[Symbol.asyncIterator]();
   const contextIterator = context.events()[Symbol.asyncIterator]();
   const state: AssistantTextState = { activeItemId: null, textByPart: new Map() };
-  let latestToolCallMetadata: ToolCallMetadata | null = null;
+  const toolCallMetadataByName = new Map<string, ToolCallMetadata>();
   let sdkDone = false;
   let contextDone = false;
   let sdkNext = tagNext("sdk", sdkIterator.next());
@@ -484,16 +491,18 @@ export async function* streamAgentResponse<TContext>(
       }
 
       sdkNext = tagNext("sdk", sdkIterator.next());
-      latestToolCallMetadata =
-        trackToolCallMetadata(next.result.value, context.getClientToolCall()?.name ?? null) ??
-        latestToolCallMetadata;
+      const metadata = toolCallMetadata(next.result.value);
+
+      if (metadata) {
+        toolCallMetadataByName.set(metadata.name, metadata.metadata);
+      }
 
       for (const event of convertSdkEvent(context, state, next.result.value)) {
         yield ThreadStreamEventSchema.parse(event);
       }
     }
 
-    const clientToolCallEvent = pendingClientToolCallEvent(context, latestToolCallMetadata);
+    const clientToolCallEvent = pendingClientToolCallEvent(context, toolCallMetadataByName);
 
     if (clientToolCallEvent) {
       yield ThreadStreamEventSchema.parse(clientToolCallEvent);
