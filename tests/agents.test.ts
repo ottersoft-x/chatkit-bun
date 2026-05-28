@@ -1276,6 +1276,126 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("includes converted annotations in final response output items", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.done",
+            item: {
+              type: "message",
+              id: "msg_1",
+              content: [
+                {
+                  type: "output_text",
+                  text: "Hello!",
+                  annotations: [
+                    {
+                      type: "url_citation",
+                      url: "https://example.com",
+                      title: "Example",
+                      start_index: 0,
+                      end_index: 6,
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "msg_1",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [
+            {
+              type: "output_text",
+              text: "Hello!",
+              annotations: [
+                {
+                  type: "annotation",
+                  source: { type: "url", url: "https://example.com", title: "Example" },
+                  index: 6,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
+  test("includes converted annotations in normalized response_done outputs", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawModel({ type: "output_text_delta", delta: "Hello!" }),
+          rawModel({
+            type: "response_done",
+            response: {
+              id: "resp_1",
+              output: [
+                {
+                  type: "message",
+                  id: "msg_real",
+                  role: "assistant",
+                  status: "completed",
+                  content: [
+                    {
+                      type: "output_text",
+                      text: "Hello!",
+                      annotations: [
+                        {
+                          type: "file_citation",
+                          file_id: "file_123",
+                          filename: "report.pdf",
+                          index: 4,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events.at(-1)).toEqual({
+      type: "thread.item.done",
+      item: {
+        id: "message_generated",
+        thread_id: "thr_1",
+        created_at: now,
+        type: "assistant_message",
+        content: [
+          {
+            type: "output_text",
+            text: "Hello!",
+            annotations: [
+              {
+                type: "annotation",
+                source: { type: "file", filename: "report.pdf", title: "report.pdf" },
+                index: 4,
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
   test("ignores unknown SDK events in the first slice", async () => {
     const agentContext = createContext();
 

@@ -1,6 +1,6 @@
 import type { AssistantMessageContent } from "../types/core";
 import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
-import { defaultResponseStreamConverter } from "./annotations";
+import { convertTextContentPart, defaultResponseStreamConverter } from "./annotations";
 import type { ResponseStreamConverter } from "./annotations";
 import type { AgentContext } from "./context";
 import type { AgentStreamInput, StreamAgentResponseOptions, ToolCallMetadata } from "./types";
@@ -142,20 +142,12 @@ function assistantItem<TContext>(
 function assistantContentFromItem(
   item: UnknownRecord,
   fallbackText: string,
+  converter: ResponseStreamConverter,
 ): AssistantMessageContent[] {
   const rawContent = Array.isArray(item.content) ? item.content : [];
   const content = rawContent.flatMap((part) => {
-    if (!isRecord(part)) {
-      return [];
-    }
-
-    const text = stringValue(part.text);
-
-    if (text === null) {
-      return [];
-    }
-
-    return [{ type: "output_text" as const, text, annotations: [] }];
+    const converted = convertTextContentPart(part, converter);
+    return converted ? [converted] : [];
   });
 
   if (content.length > 0) {
@@ -316,7 +308,7 @@ function convertSdkEvent<TContext>(
         item: assistantItem(
           context,
           itemId,
-          assistantContentFromItem(item, fallbackText),
+          assistantContentFromItem(item, fallbackText, converter),
         ),
       };
 
@@ -437,7 +429,7 @@ function convertSdkEvent<TContext>(
       return [
         {
           type: "thread.item.done",
-          item: assistantItem(context, itemId, assistantContentFromItem(item, fallbackText)),
+          item: assistantItem(context, itemId, assistantContentFromItem(item, fallbackText, converter)),
         },
       ];
     }

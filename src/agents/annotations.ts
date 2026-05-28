@@ -90,4 +90,33 @@ export class ResponseStreamConverter {
   }
 }
 
+export interface ConvertedTextContent {
+  type: "output_text";
+  text: string;
+  annotations: Annotation[];
+}
+
+export function convertTextContentPart(
+  part: unknown,
+  converter: ResponseStreamConverter,
+): ConvertedTextContent | null {
+  if (!isRecord(part) || part.type !== "output_text") {
+    return null;
+  }
+
+  const text = stringValue(part.text);
+  if (text === null) {
+    return null;
+  }
+
+  const annotations = Array.isArray(part.annotations)
+    ? part.annotations.flatMap((annotation) => {
+        const converted = converter.convertAnnotation(annotation);
+        return converted ? [converted] : [];
+      })
+    : [];
+
+  return { type: "output_text", text, annotations };
+}
+
 export const defaultResponseStreamConverter = new ResponseStreamConverter();
