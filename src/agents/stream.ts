@@ -278,8 +278,8 @@ function pendingClientToolCallEvent<TContext>(
     return null;
   }
 
-  const fallbackId = context.store.generateItemId("tool_call", context.thread, context.context);
-  const id = metadata?.itemId ?? fallbackId;
+  const id =
+    metadata?.itemId ?? context.store.generateItemId("tool_call", context.thread, context.context);
 
   return {
     type: "thread.item.done",

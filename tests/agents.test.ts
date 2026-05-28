@@ -95,10 +95,34 @@ class TestStore extends BaseStore<RequestContext> {
   }
 }
 
-function createContext(): AgentContext<RequestContext> {
+class ThrowingToolCallIdStore extends TestStore {
+  override generateItemId(itemType: StoreItemType): string {
+    if (itemType === "tool_call") {
+      throw new Error("tool_call ids should not be generated when SDK metadata is present");
+    }
+
+    return super.generateItemId(itemType);
+  }
+}
+
+class RecordingToolCallIdStore extends TestStore {
+  readonly toolCallIds: string[] = [];
+
+  override generateItemId(itemType: StoreItemType): string {
+    if (itemType !== "tool_call") {
+      return super.generateItemId(itemType);
+    }
+
+    const id = `tool_call_generated_${this.toolCallIds.length + 1}`;
+    this.toolCallIds.push(id);
+    return id;
+  }
+}
+
+function createContext(store: TestStore = new TestStore()): AgentContext<RequestContext> {
   return new AgentContext({
     thread,
-    store: new TestStore(),
+    store,
     context: requestContext,
     now: () => now,
   });
@@ -496,7 +520,7 @@ describe("streamAgentResponse", () => {
   });
 
   test("emits a deferred pending client tool call with SDK metadata", async () => {
-    const agentContext = createContext();
+    const agentContext = createContext(new ThrowingToolCallIdStore());
     agentContext.setClientToolCall(new ClientToolCall("get_selection", { includeHtml: true }));
 
     const events = await collect(
@@ -536,7 +560,8 @@ describe("streamAgentResponse", () => {
   });
 
   test("generates fallback client tool ids when SDK metadata is absent", async () => {
-    const agentContext = createContext();
+    const store = new RecordingToolCallIdStore();
+    const agentContext = createContext(store);
     agentContext.setClientToolCall(new ClientToolCall("get_selection"));
 
     const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
@@ -545,17 +570,18 @@ describe("streamAgentResponse", () => {
       {
         type: "thread.item.done",
         item: {
-          id: "tool_call_generated",
+          id: "tool_call_generated_1",
           thread_id: "thr_1",
           created_at: now,
           type: "client_tool_call",
           status: "pending",
-          call_id: "tool_call_generated",
+          call_id: "tool_call_generated_1",
           name: "get_selection",
           arguments: {},
         },
       },
     ]);
+    expect(store.toolCallIds).toEqual(["tool_call_generated_1"]);
   });
 
   test("cancelling the merged stream returns the SDK iterator", async () => {
