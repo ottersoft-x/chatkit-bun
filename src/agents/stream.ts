@@ -210,6 +210,45 @@ function matchingStreamingThought(
   return null;
 }
 
+function durationSeconds(startedAt: string, endedAt: string): number {
+  const started = Date.parse(startedAt);
+  const ended = Date.parse(endedAt);
+
+  if (!Number.isFinite(started) || !Number.isFinite(ended)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.floor((ended - started) / 1000));
+}
+
+function endActiveWorkflow<TContext>(
+  context: AgentContext<TContext>,
+): Extract<ThreadStreamEvent, { type: "thread.item.done" }> | null {
+  const workflow = context.workflowItem;
+
+  if (!workflow) {
+    return null;
+  }
+
+  const endedAt = context.createdAt();
+  const summary =
+    workflow.workflow.summary ?? { duration: durationSeconds(workflow.created_at, endedAt) };
+  const doneItem: WorkflowItem = {
+    ...workflow,
+    workflow: {
+      ...workflow.workflow,
+      summary,
+      expanded: false,
+    },
+  };
+  context.workflowItem = null;
+
+  return {
+    type: "thread.item.done",
+    item: doneItem,
+  };
+}
+
 function assistantContentFromItem(
   item: UnknownRecord,
   fallbackText: string,
@@ -433,13 +472,19 @@ async function convertSdkEvent<TContext>(
       const itemId =
         stringValue(item.id) ?? context.store.generateItemId("message", context.thread, context.context);
       state.activeItemId = itemId;
+      const events: ThreadStreamEvent[] = [];
+      const workflowDone = endActiveWorkflow(context);
 
-      return [
-        {
-          type: "thread.item.added",
-          item: assistantItem(context, itemId, []),
-        },
-      ];
+      if (workflowDone) {
+        events.push(workflowDone);
+      }
+
+      events.push({
+        type: "thread.item.added",
+        item: assistantItem(context, itemId, []),
+      });
+
+      return events;
     }
 
     case "response.output_text.delta": {

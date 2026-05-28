@@ -963,6 +963,136 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("ends active reasoning workflows before assistant message items", async () => {
+    const agentContext = createContext();
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "reasoning", id: "resp_1", summary: [] },
+          }),
+          rawResponse({
+            type: "response.reasoning_summary_text.done",
+            item_id: "resp_1",
+            summary_index: 0,
+            text: "Thinking 1",
+          }),
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "message", id: "msg_1" },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: { type: "reasoning", tasks: [], expanded: false },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.added",
+          task_index: 0,
+          task: { type: "thought", content: "Thinking 1", status_indicator: "none" },
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "reasoning",
+            tasks: [{ type: "thought", content: "Thinking 1", status_indicator: "none" }],
+            summary: { duration: 0 },
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_1",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+    ]);
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
+  test("preserves existing workflow summaries when auto-ending before assistant messages", async () => {
+    const agentContext = createContext();
+    agentContext.workflowItem = {
+      id: "wf_existing",
+      thread_id: thread.id,
+      created_at: now,
+      type: "workflow",
+      workflow: {
+        type: "custom",
+        tasks: [],
+        summary: { title: "Test" },
+        expanded: true,
+      },
+    };
+
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "message", id: "msg_1" },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "wf_existing",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [],
+            summary: { title: "Test" },
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_1",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+    ]);
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
   test("yields context events while waiting for SDK events", async () => {
     const agentContext = createContext();
     const gate = deferred();
