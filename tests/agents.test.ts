@@ -368,6 +368,60 @@ describe("streamAgentResponse", () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
   });
 
+  test("prefers queued context events over ready SDK events", async () => {
+    const agentContext = createContext();
+    const iterator = streamAgentResponse(
+      agentContext,
+      streamedRun([
+        rawResponse({
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          content_index: 0,
+          delta: "first",
+        }),
+        rawResponse({
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          content_index: 0,
+          delta: "second",
+        }),
+      ]),
+    )[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "first",
+        },
+      },
+    });
+
+    agentContext.stream({ type: "progress_update", icon: null, text: "Queued context" });
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: { type: "progress_update", icon: null, text: "Queued context" },
+    });
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "second",
+        },
+      },
+    });
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+  });
+
   test("ignores unknown SDK events in the first slice", async () => {
     const agentContext = createContext();
 

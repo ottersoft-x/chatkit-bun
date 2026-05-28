@@ -133,6 +133,12 @@ function trackToolCallMetadata(event: unknown): ToolCallMetadata | null {
   };
 }
 
+async function settledResult<T>(promise: Promise<IteratorResult<T>>): Promise<IteratorResult<T> | null> {
+  const notReady = Symbol("notReady");
+  const result = await Promise.race([promise, Promise.resolve(notReady)]);
+  return result === notReady ? null : (result as IteratorResult<T>);
+}
+
 function convertSdkEvent<TContext>(
   context: AgentContext<TContext>,
   state: AssistantTextState,
@@ -283,14 +289,28 @@ export async function* streamAgentResponse<TContext>(
 
   try {
     while (!sdkDone || !contextDone) {
-      const contenders: Array<Promise<{ source: "sdk" | "context"; result: IteratorResult<unknown> }>> = [];
+      if (!contextDone) {
+        const readyContextResult = await settledResult(contextNext);
 
-      if (!sdkDone) {
-        contenders.push(sdkNext.then((result) => ({ source: "sdk", result })));
+        if (readyContextResult) {
+          if (readyContextResult.done) {
+            contextDone = true;
+          } else {
+            contextNext = contextIterator.next();
+            yield ThreadStreamEventSchema.parse(readyContextResult.value);
+          }
+          continue;
+        }
       }
+
+      const contenders: Array<Promise<{ source: "sdk" | "context"; result: IteratorResult<unknown> }>> = [];
 
       if (!contextDone) {
         contenders.push(contextNext.then((result) => ({ source: "context", result })));
+      }
+
+      if (!sdkDone) {
+        contenders.push(sdkNext.then((result) => ({ source: "sdk", result })));
       }
 
       if (contenders.length === 0) {
