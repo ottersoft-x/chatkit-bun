@@ -714,6 +714,15 @@ describe("AgentContext", () => {
     ]);
   });
 
+  test("addWorkflowTask validates tasks before lazily creating workflow state", () => {
+    const agentContext = createContext();
+
+    expect(() =>
+      agentContext.addWorkflowTask({ type: "custom", status_indicator: "invalid" } as never),
+    ).toThrow();
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
   test("updateWorkflowTask replaces workflow tasks and emits task updates", async () => {
     const agentContext = createContext();
 

@@ -5,6 +5,7 @@ import {
   appendWorkflowTask,
   createWorkflowItem,
   finishWorkflow,
+  normalizeWorkflowTask,
   shouldEmitWorkflowAdded,
   updateWorkflowTaskEvent,
   workflowAddedEvent,
@@ -120,6 +121,8 @@ export class AgentContext<TContext> {
   }
 
   addWorkflowTask(task: Task): void {
+    const normalizedTask = normalizeWorkflowTask(task);
+
     if (!this.workflowItem) {
       this.workflowItem = createWorkflowItem(this, {
         type: "custom",
@@ -131,7 +134,7 @@ export class AgentContext<TContext> {
     const shouldEmitAdded =
       this.workflowItem.workflow.type !== "reasoning" &&
       this.workflowItem.workflow.tasks.length === 0;
-    const event = appendWorkflowTask(this.workflowItem, task);
+    const event = appendWorkflowTask(this.workflowItem, normalizedTask);
 
     this.stream(shouldEmitAdded ? workflowAddedEvent(this.workflowItem) : event);
   }

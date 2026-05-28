@@ -91,8 +91,12 @@ export function workflowTaskUpdatedEvent(
   };
 }
 
+export function normalizeWorkflowTask(task: Task): Task {
+  return TaskSchema.parse(task);
+}
+
 export function appendWorkflowTask(workflow: WorkflowItem, task: Task): ThreadItemUpdatedEvent {
-  const parsedTask = TaskSchema.parse(task);
+  const parsedTask = normalizeWorkflowTask(task);
   workflow.workflow.tasks.push(parsedTask);
   return workflowTaskAddedEvent(workflow, parsedTask, workflow.workflow.tasks.length - 1);
 }
@@ -110,7 +114,7 @@ export function updateWorkflowTaskEvent(
     throw new RangeError("Workflow task index is out of range");
   }
 
-  const parsedTask = TaskSchema.parse(task);
+  const parsedTask = normalizeWorkflowTask(task);
   workflow.workflow.tasks[taskIndex] = parsedTask;
   return workflowTaskUpdatedEvent(workflow, parsedTask, taskIndex);
 }
