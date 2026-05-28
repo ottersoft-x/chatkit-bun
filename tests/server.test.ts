@@ -1812,6 +1812,159 @@ describe("ChatKitServer", () => {
     });
   });
 
+  test("preserves final assistant annotations when merging pending text updates", async () => {
+    const server = new TestServer(async function* (thread) {
+      const assistant = { ...makeAssistantMessage(""), id: "msg_annotated", thread_id: thread.id };
+      yield { type: "thread.item.added", item: assistant };
+      yield {
+        type: "thread.item.updated",
+        item_id: assistant.id,
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "Hello!",
+        },
+      };
+      yield {
+        type: "thread.item.updated",
+        item_id: assistant.id,
+        update: {
+          type: "assistant_message.content_part.done",
+          content_index: 0,
+          content: { type: "output_text", text: "Hello!", annotations: [] },
+        },
+      };
+      yield {
+        type: "thread.item.done",
+        item: {
+          ...assistant,
+          content: [
+            {
+              type: "output_text",
+              text: "Hello!",
+              annotations: [
+                {
+                  type: "annotation",
+                  source: { type: "url", url: "https://example.com", title: "Example" },
+                  index: 6,
+                },
+              ],
+            },
+          ],
+        },
+      };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Annotate" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    await decodeStream(result);
+    await expect(server.store.loadItem(thread.id, "msg_annotated", defaultContext)).resolves.toMatchObject({
+      type: "assistant_message",
+      content: [
+        {
+          type: "output_text",
+          text: "Hello!",
+          annotations: [
+            {
+              type: "annotation",
+              source: { type: "url", url: "https://example.com", title: "Example" },
+              index: 6,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
+  test("keeps streamed assistant annotations when final content has none", async () => {
+    const server = new TestServer(async function* (thread) {
+      const assistant = { ...makeAssistantMessage(""), id: "msg_streamed_annotation", thread_id: thread.id };
+      yield { type: "thread.item.added", item: assistant };
+      yield {
+        type: "thread.item.updated",
+        item_id: assistant.id,
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "Hello!",
+        },
+      };
+      yield {
+        type: "thread.item.updated",
+        item_id: assistant.id,
+        update: {
+          type: "assistant_message.content_part.annotation_added",
+          content_index: 0,
+          annotation_index: 0,
+          annotation: {
+            type: "annotation",
+            source: { type: "file", filename: "report.pdf", title: "Report" },
+            index: 6,
+          },
+        },
+      };
+      yield {
+        type: "thread.item.done",
+        item: {
+          ...assistant,
+          content: [{ type: "output_text", text: "Hello!", annotations: [] }],
+        },
+      };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Annotate" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    await decodeStream(result);
+    await expect(server.store.loadItem(thread.id, "msg_streamed_annotation", defaultContext)).resolves.toMatchObject({
+      type: "assistant_message",
+      content: [
+        {
+          type: "output_text",
+          text: "Hello!",
+          annotations: [
+            {
+              type: "annotation",
+              source: { type: "file", filename: "report.pdf", title: "Report" },
+              index: 6,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   test("removes an item from the store from a thread item removed event", async () => {
     const server = new TestServer(async function* () {
       yield { type: "thread.item.removed", item_id: "msg_remove" };
