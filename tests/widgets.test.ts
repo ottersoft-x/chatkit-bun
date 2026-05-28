@@ -286,6 +286,31 @@ describe("widgets", () => {
     ]);
   });
 
+  test("diffWidget returns a root replacement when adding a streaming Text child with an id", () => {
+    expect(
+      diffWidget(
+        Card({ children: [Text({ id: "a", value: "A", streaming: true })] }),
+        Card({
+          children: [
+            Text({ id: "a", value: "A", streaming: true }),
+            Text({ id: "b", value: "B", streaming: true }),
+          ],
+        }),
+      ),
+    ).toEqual([
+      {
+        type: "widget.root.updated",
+        widget: {
+          type: "Card",
+          children: [
+            { type: "Text", id: "a", value: "A", streaming: true },
+            { type: "Text", id: "b", value: "B", streaming: true },
+          ],
+        },
+      },
+    ]);
+  });
+
   test("diffWidget returns a root replacement for primitive array prop changes", () => {
     expect(
       diffWidget(
