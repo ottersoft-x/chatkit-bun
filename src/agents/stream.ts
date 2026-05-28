@@ -97,6 +97,18 @@ function partKey(itemId: string, contentIndex: number): string {
   return `${itemId}:${contentIndex}`;
 }
 
+function clearAssistantTextState(state: AssistantTextState, itemId: string): void {
+  for (const key of state.textByPart.keys()) {
+    if (key.startsWith(`${itemId}:`)) {
+      state.textByPart.delete(key);
+    }
+  }
+
+  if (state.activeItemId === itemId) {
+    state.activeItemId = null;
+  }
+}
+
 function assistantItem<TContext>(
   context: AgentContext<TContext>,
   itemId: string,
@@ -282,17 +294,18 @@ function convertSdkEvent<TContext>(
         stringValue(response.id) ??
         context.store.generateItemId("message", context.thread, context.context);
       const fallbackText = state.textByPart.get(partKey(itemId, 0)) ?? "";
+      const doneEvent: ThreadStreamEvent = {
+        type: "thread.item.done",
+        item: assistantItem(
+          context,
+          itemId,
+          assistantContentFromItem(item, fallbackText),
+        ),
+      };
 
-      return [
-        {
-          type: "thread.item.done",
-          item: assistantItem(
-            context,
-            itemId,
-            assistantContentFromItem(item, fallbackText),
-          ),
-        },
-      ];
+      clearAssistantTextState(state, itemId);
+
+      return [doneEvent];
     }
 
     case "response.output_item.added": {

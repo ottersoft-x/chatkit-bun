@@ -119,6 +119,20 @@ class RecordingToolCallIdStore extends TestStore {
   }
 }
 
+class RecordingMessageIdStore extends TestStore {
+  readonly messageIds: string[] = [];
+
+  override generateItemId(itemType: StoreItemType): string {
+    if (itemType !== "message") {
+      return super.generateItemId(itemType);
+    }
+
+    const id = `message_generated_${this.messageIds.length + 1}`;
+    this.messageIds.push(id);
+    return id;
+  }
+}
+
 function createContext(store: TestStore = new TestStore()): AgentContext<RequestContext> {
   return new AgentContext({
     thread,
@@ -524,6 +538,114 @@ describe("streamAgentResponse", () => {
     );
 
     expect(events.filter((event) => event.type === "thread.item.done")).toHaveLength(1);
+  });
+
+  test("starts a new assistant item after each normalized response_done", async () => {
+    const store = new RecordingMessageIdStore();
+    const agentContext = createContext(store);
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawModel({ type: "output_text_delta", delta: "Hello" }),
+          rawModel({
+            type: "response_done",
+            response: {
+              id: "resp_first",
+              output: [
+                {
+                  type: "message",
+                  id: "msg_first",
+                  role: "assistant",
+                  status: "completed",
+                  content: [{ type: "output_text", text: "Hello" }],
+                },
+              ],
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+          }),
+          rawModel({
+            type: "response_done",
+            response: {
+              id: "resp_tool_only",
+              output: [
+                {
+                  type: "tool_search_call",
+                  id: "tool_search_1",
+                  call_id: "call_1",
+                  execution: "server",
+                  arguments: {},
+                },
+              ],
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+          }),
+          rawModel({ type: "output_text_delta", delta: "Goodbye" }),
+          rawModel({
+            type: "response_done",
+            response: {
+              id: "resp_second",
+              output: [
+                {
+                  type: "message",
+                  id: "msg_second",
+                  role: "assistant",
+                  status: "completed",
+                  content: [{ type: "output_text", text: "Goodbye" }],
+                },
+              ],
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(store.messageIds).toEqual(["message_generated_1", "message_generated_2"]);
+    expect(events.filter((event) => event.type === "thread.item.added")).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "message_generated_1",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      {
+        type: "thread.item.added",
+        item: {
+          id: "message_generated_2",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+    ]);
+    expect(events.filter((event) => event.type === "thread.item.done")).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "message_generated_1",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [{ type: "output_text", text: "Hello", annotations: [] }],
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "message_generated_2",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [{ type: "output_text", text: "Goodbye", annotations: [] }],
+        },
+      },
+    ]);
   });
 
   test("maps provider response events wrapped in normalized model events", async () => {
