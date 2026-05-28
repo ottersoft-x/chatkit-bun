@@ -9,11 +9,16 @@ type UnknownRecord = Record<string, unknown>;
 
 type GeneratedImageItem = Extract<ThreadItem, { type: "generated_image" }>;
 
+interface GeneratedImageState {
+  callId: string | null;
+  item: GeneratedImageItem;
+}
+
 interface AssistantTextState {
   activeItemId: string | null;
   textByPart: Map<string, string>;
   annotationCountByPart: Map<string, number>;
-  generatedImageItem: GeneratedImageItem | null;
+  generatedImage: GeneratedImageState | null;
 }
 
 type StreamSource = "sdk" | "context";
@@ -342,9 +347,10 @@ async function convertSdkEvent<TContext>(
       }
 
       if (item.type === "image_generation_call") {
+        const callId = stringValue(item.id);
         const itemId = context.store.generateItemId("message", context.thread, context.context);
         const generated = generatedImageItem(context, itemId, null);
-        state.generatedImageItem = generated;
+        state.generatedImage = { callId, item: generated };
 
         return [
           {
@@ -455,8 +461,23 @@ async function convertSdkEvent<TContext>(
       if (item.type === "image_generation_call") {
         const imageId = stringValue(item.id);
         const result = stringValue(item.result);
+        const generatedImage = state.generatedImage;
 
-        if (!state.generatedImageItem || !imageId || !result) {
+        if (!generatedImage) {
+          return [];
+        }
+
+        if (generatedImage.callId !== null && imageId !== generatedImage.callId) {
+          return [];
+        }
+
+        if (!result) {
+          state.generatedImage = null;
+          return [];
+        }
+
+        if (!imageId) {
+          state.generatedImage = null;
           return [];
         }
 
@@ -464,8 +485,8 @@ async function convertSdkEvent<TContext>(
           id: imageId,
           url: await converter.base64ImageToUrl(imageId, result, null),
         };
-        const doneItem = { ...state.generatedImageItem, image };
-        state.generatedImageItem = null;
+        const doneItem = { ...generatedImage.item, image };
+        state.generatedImage = null;
 
         return [
           {
@@ -541,7 +562,7 @@ export async function* streamAgentResponse<TContext>(
     activeItemId: null,
     textByPart: new Map(),
     annotationCountByPart: new Map(),
-    generatedImageItem: null,
+    generatedImage: null,
   };
   const toolCallMetadataByName = new Map<string, ToolCallMetadata>();
   let sdkDone = false;

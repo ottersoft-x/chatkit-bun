@@ -1535,6 +1535,41 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("clears active generated image state when final event has no result", async () => {
+    await expect(
+      collect(
+        streamAgentResponse(
+          createContext(),
+          streamedRun([
+            rawResponse({
+              type: "response.output_item.added",
+              item: { type: "image_generation_call", id: "img_call_1" },
+            }),
+            rawResponse({
+              type: "response.output_item.done",
+              item: { type: "image_generation_call", id: "img_call_1" },
+            }),
+            rawResponse({
+              type: "response.output_item.done",
+              item: { type: "image_generation_call", id: "img_call_2", result: "dGVzdA==" },
+            }),
+          ]),
+        ),
+      ),
+    ).resolves.toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "generated_image",
+          image: null,
+        },
+      },
+    ]);
+  });
+
   test("ignores unknown SDK events in the first slice", async () => {
     const agentContext = createContext();
 
