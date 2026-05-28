@@ -255,6 +255,7 @@ describe("ResponseStreamConverter", () => {
         index: 12,
       }),
     ).toEqual({
+      type: "annotation",
       source: { type: "file", filename: "report.pdf", title: "report.pdf" },
       index: 12,
     });
@@ -269,6 +270,7 @@ describe("ResponseStreamConverter", () => {
         end_index: 9,
       }),
     ).toEqual({
+      type: "annotation",
       source: { type: "file", filename: "container.txt", title: "container.txt" },
       index: 9,
     });
@@ -282,6 +284,7 @@ describe("ResponseStreamConverter", () => {
         end_index: 15,
       }),
     ).toEqual({
+      type: "annotation",
       source: {
         type: "url",
         url: "https://example.com/report",

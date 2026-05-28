@@ -1,7 +1,6 @@
 import type { Annotation } from "../types/core";
 
 type UnknownRecord = Record<string, unknown>;
-type DefaultableAnnotation = Omit<Annotation, "type"> & Partial<Pick<Annotation, "type">>;
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === "object" && value !== null;
@@ -21,7 +20,7 @@ function numberValue(value: unknown): number | null {
 }
 
 export class ResponseStreamConverter {
-  convertAnnotation(annotation: unknown): DefaultableAnnotation | null {
+  convertAnnotation(annotation: unknown): Annotation | null {
     if (!isRecord(annotation)) {
       return null;
     }
@@ -38,7 +37,7 @@ export class ResponseStreamConverter {
     }
   }
 
-  fileCitationToAnnotation(annotation: unknown): DefaultableAnnotation | null {
+  fileCitationToAnnotation(annotation: unknown): Annotation | null {
     if (!isRecord(annotation)) {
       return null;
     }
@@ -49,12 +48,13 @@ export class ResponseStreamConverter {
     }
 
     return {
+      type: "annotation",
       source: { type: "file", filename, title: filename },
       index: numberValue(annotation.index),
     };
   }
 
-  containerFileCitationToAnnotation(annotation: unknown): DefaultableAnnotation | null {
+  containerFileCitationToAnnotation(annotation: unknown): Annotation | null {
     if (!isRecord(annotation)) {
       return null;
     }
@@ -65,12 +65,13 @@ export class ResponseStreamConverter {
     }
 
     return {
+      type: "annotation",
       source: { type: "file", filename, title: filename },
       index: numberValue(annotation.end_index),
     };
   }
 
-  urlCitationToAnnotation(annotation: unknown): DefaultableAnnotation | null {
+  urlCitationToAnnotation(annotation: unknown): Annotation | null {
     if (!isRecord(annotation)) {
       return null;
     }
@@ -82,6 +83,7 @@ export class ResponseStreamConverter {
     }
 
     return {
+      type: "annotation",
       source: { type: "url", url, title },
       index: numberValue(annotation.end_index),
     };
