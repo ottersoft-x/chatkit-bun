@@ -753,7 +753,10 @@ export abstract class ChatKitServer<TContext = unknown> {
       annotations.splice(update.annotation_index, 0, update.annotation);
       content[update.content_index] = { ...current, annotations };
     } else if (update.type === "assistant_message.content_part.done") {
-      content[update.content_index] = update.content;
+      content[update.content_index] =
+        update.content.annotations.length === 0 && current.annotations.length > 0
+          ? { ...update.content, annotations: current.annotations }
+          : update.content;
     }
 
     return { ...item, content };
