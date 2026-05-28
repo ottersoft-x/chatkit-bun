@@ -98,7 +98,11 @@ class UnusedStore<TContext> extends BaseStore<TContext> {
 }
 
 class RecordingServer extends ChatKitServer<RequestContext | undefined> {
-  readonly calls: Array<{ body: string; context: RequestContext | undefined }> = [];
+  readonly calls: Array<{
+    body: string;
+    context: RequestContext | undefined;
+    receivedArrayBuffer: boolean;
+  }> = [];
 
   constructor(private readonly result: StreamingResult | NonStreamingResult) {
     super(new UnusedStore<RequestContext | undefined>());
@@ -112,6 +116,7 @@ class RecordingServer extends ChatKitServer<RequestContext | undefined> {
     request: ProcessInput,
     context: RequestContext | undefined,
   ): Promise<StreamingResult | NonStreamingResult> {
+    const receivedArrayBuffer = request instanceof ArrayBuffer;
     const bytes =
       typeof request === "string"
         ? encoder.encode(request)
@@ -119,7 +124,7 @@ class RecordingServer extends ChatKitServer<RequestContext | undefined> {
           ? new Uint8Array(request)
           : request;
 
-    this.calls.push({ body: decoder.decode(bytes), context });
+    this.calls.push({ body: decoder.decode(bytes), context, receivedArrayBuffer });
     return this.result;
   }
 }
@@ -168,6 +173,7 @@ describe("createChatKitHandler", () => {
       {
         body: JSON.stringify({ type: "threads.list", params: {} }),
         context: undefined,
+        receivedArrayBuffer: true,
       },
     ]);
   });
@@ -190,15 +196,28 @@ describe("createChatKitHandler", () => {
     expect(response.headers.get("content-type")).toBe("text/event-stream");
     expect(response.headers.get("cache-control")).toBe("no-cache");
     expect(await response.text()).toBe(chunks.join(""));
+    expect(server.calls).toEqual([
+      {
+        body: JSON.stringify({ type: "threads.create", params: {} }),
+        context: undefined,
+        receivedArrayBuffer: true,
+      },
+    ]);
   });
 
   test("uses getContext to resolve per-request context", async () => {
     const server = new RecordingServer(jsonResult({ ok: true }));
+    let getContextCalls = 0;
     const handler = createChatKitHandler(server, {
-      getContext: (request) => ({
-        userId: request.headers.get("x-user-id") ?? "anonymous",
-        url: request.url,
-      }),
+      getContext: async (request) => {
+        getContextCalls++;
+        await Promise.resolve();
+
+        return {
+          userId: request.headers.get("x-user-id") ?? "anonymous",
+          url: request.url,
+        };
+      },
     });
 
     await handler(
@@ -209,6 +228,7 @@ describe("createChatKitHandler", () => {
       }),
     );
 
+    expect(getContextCalls).toBe(1);
     expect(server.calls).toEqual([
       {
         body: "context-body",
@@ -216,6 +236,7 @@ describe("createChatKitHandler", () => {
           userId: "user_123",
           url: "https://example.com/chatkit",
         },
+        receivedArrayBuffer: true,
       },
     ]);
   });
@@ -240,6 +261,13 @@ describe("createChatKitHandler", () => {
     const first = await reader.read();
 
     expect(decoder.decode(first.value)).toBe("data: one\n\n");
+    expect(server.calls).toEqual([
+      {
+        body: JSON.stringify({ type: "threads.create", params: {} }),
+        context: undefined,
+        receivedArrayBuffer: true,
+      },
+    ]);
 
     await reader.cancel();
 
