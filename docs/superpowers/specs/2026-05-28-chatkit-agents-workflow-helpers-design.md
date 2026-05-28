@@ -64,6 +64,8 @@ workflow state object.
 
 - Create a workflow item using
   `store.generateItemId("workflow", thread, context)`.
+- Clone and normalize the caller-provided workflow through the existing workflow
+  schema before storing it on the context.
 - Set `created_at` with `createdAt()`.
 - Set `thread_id` to the current thread id.
 - Store the item on `workflowItem`.
@@ -75,7 +77,8 @@ workflow state object.
 `addWorkflowTask(task)` should:
 
 - Lazily create a custom workflow if `workflowItem` is `null`.
-- Append the task to `workflowItem.workflow.tasks`.
+- Clone and normalize the caller-provided task through the existing task schema.
+- Append the normalized task to `workflowItem.workflow.tasks`.
 - If this is the first task in a non-reasoning workflow that has not yet been
   emitted, emit `thread.item.added` with the workflow item.
 - Otherwise emit `thread.item.updated` with `workflow.task.added` and the new
@@ -86,13 +89,16 @@ workflow state object.
 - Throw `Error("Workflow is not set")` if no workflow is active.
 - Throw `RangeError("Workflow task index is out of range")` if `taskIndex`
   does not refer to an existing task in the active workflow.
-- Replace `workflowItem.workflow.tasks[taskIndex]` with the provided task.
+- Clone and normalize the caller-provided task through the existing task schema.
+- Replace `workflowItem.workflow.tasks[taskIndex]` with the normalized task.
 - Emit `thread.item.updated` with `workflow.task.updated` and the provided
   index.
 
 `endWorkflow(summary, expanded = false)` should:
 
 - Return without emitting an event if no workflow is active.
+- If the active workflow is a deferred empty custom workflow, clear
+  `workflowItem` and return without emitting an event.
 - If `summary` is provided, set it on the workflow.
 - If `summary` is omitted and the workflow has no summary, set
   `{ duration: seconds }`, where `seconds` is the non-negative integer number of
@@ -149,6 +155,8 @@ Extend `tests/agents.test.ts` with helper-focused tests inside
 
 - `startWorkflow(...)` emits `thread.item.added` for reasoning workflows.
 - `startWorkflow(...)` defers `thread.item.added` for empty custom workflows.
+- `startWorkflow(...)` clones caller-provided workflow tasks before storing
+  workflow state.
 - `addWorkflowTask(...)` lazily creates a custom workflow and emits
   `thread.item.added` for the first custom task.
 - `addWorkflowTask(...)` emits `workflow.task.added` for subsequent tasks.
@@ -157,6 +165,8 @@ Extend `tests/agents.test.ts` with helper-focused tests inside
 - `updateWorkflowTask(...)` throws when the task index is out of range.
 - `endWorkflow(...)` emits `thread.item.done`, defaults to a duration summary,
   collapses the workflow, and clears `workflowItem`.
+- `endWorkflow(...)` clears a deferred empty custom workflow without emitting an
+  orphan `thread.item.done` event.
 - `endWorkflow(...)` preserves an existing summary when no summary argument is
   provided.
 - `endWorkflow(...)` accepts an explicit summary and expanded state.
@@ -184,6 +194,10 @@ The milestone is complete when:
 - Helper methods emit validated `ThreadStreamEvent` values through the existing
   context event queue.
 - Empty custom workflows are not emitted until the first task is added.
+- Ending a deferred empty custom workflow clears state without emitting an
+  orphan done event.
+- Workflow helpers clone and normalize caller-provided workflow data before
+  storing it.
 - Lazy custom workflow creation works from `addWorkflowTask(...)`.
 - Workflow task add/update helpers mutate `workflowItem` and emit matching
   `workflow.task.*` events.

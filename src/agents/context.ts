@@ -1,6 +1,15 @@
-import type { ThreadItem } from "../types/core";
+import type { Task, ThreadItem, Workflow, WorkflowSummary } from "../types/core";
 import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
 import type { AgentContextOptions, JsonObject } from "./types";
+import {
+  appendWorkflowTask,
+  createWorkflowItem,
+  finishWorkflow,
+  normalizeWorkflowTask,
+  shouldEmitWorkflowAdded,
+  updateWorkflowTaskEvent,
+  workflowAddedEvent,
+} from "./workflows";
 
 class AsyncEventQueue<T> implements AsyncIterable<T> {
   private readonly values: T[] = [];
@@ -100,6 +109,50 @@ export class AgentContext<TContext> {
 
   closeEvents(): void {
     this.queue.close();
+  }
+
+  startWorkflow(workflow: Workflow): void {
+    const item = createWorkflowItem(this, workflow);
+    this.workflowItem = item;
+
+    if (shouldEmitWorkflowAdded(item.workflow)) {
+      this.stream(workflowAddedEvent(item));
+    }
+  }
+
+  addWorkflowTask(task: Task): void {
+    const normalizedTask = normalizeWorkflowTask(task);
+
+    if (!this.workflowItem) {
+      this.workflowItem = createWorkflowItem(this, {
+        type: "custom",
+        tasks: [],
+        expanded: false,
+      });
+    }
+
+    const shouldEmitAdded =
+      this.workflowItem.workflow.type !== "reasoning" &&
+      this.workflowItem.workflow.tasks.length === 0;
+    const event = appendWorkflowTask(this.workflowItem, normalizedTask);
+
+    this.stream(shouldEmitAdded ? workflowAddedEvent(this.workflowItem) : event);
+  }
+
+  updateWorkflowTask(task: Task, taskIndex: number): void {
+    if (!this.workflowItem) {
+      throw new Error("Workflow is not set");
+    }
+
+    this.stream(updateWorkflowTaskEvent(this.workflowItem, task, taskIndex));
+  }
+
+  endWorkflow(summary?: WorkflowSummary, expanded = false): void {
+    const event = finishWorkflow(this, summary, expanded);
+
+    if (event) {
+      this.stream(event);
+    }
   }
 
   setClientToolCall(toolCall: ClientToolCall): void {

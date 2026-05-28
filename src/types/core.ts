@@ -192,6 +192,7 @@ export const WorkflowSummarySchema = z.union([
   z.object({ title: z.string(), icon: z.string().nullable().optional() }),
   z.object({ duration: z.number().int() }),
 ]);
+export type WorkflowSummary = z.infer<typeof WorkflowSummarySchema>;
 
 export const WorkflowSchema = z.object({
   type: z.enum(["custom", "reasoning"]),

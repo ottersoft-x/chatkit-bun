@@ -102,6 +102,59 @@ Add these tests inside the existing `describe("AgentContext", () => {` block, af
     });
   });
 
+  test("ending a deferred empty custom workflow clears state without emitting an orphan done event", async () => {
+    const agentContext = createContext();
+
+    agentContext.startWorkflow({ type: "custom", tasks: [], expanded: false });
+    agentContext.endWorkflow();
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([]);
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
+  test("startWorkflow clones caller-provided workflow tasks", async () => {
+    const agentContext = createContext();
+    const task = { type: "custom" as const, title: "Fetch data", status_indicator: "loading" as const };
+
+    agentContext.startWorkflow({ type: "custom", tasks: [task], expanded: false });
+    task.title = "Mutated outside context";
+    agentContext.endWorkflow();
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Fetch data", status_indicator: "loading" }],
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Fetch data", status_indicator: "loading" }],
+            summary: { duration: 0 },
+            expanded: false,
+          },
+        },
+      },
+    ]);
+  });
+
   test("ends workflows with duration summaries by default", async () => {
     const agentContext = createContext();
 
@@ -275,7 +328,7 @@ export type WorkflowSummary = z.infer<typeof WorkflowSummarySchema>;
 Create `src/agents/workflows.ts`:
 
 ```ts
-import type { Task, ThreadItem, Workflow, WorkflowSummary } from "../types/core";
+import { WorkflowSchema, type Task, type ThreadItem, type Workflow, type WorkflowSummary } from "../types/core";
 import type { ThreadStreamEvent } from "../types/server";
 import type { AgentContext } from "./context";
 
@@ -289,16 +342,14 @@ export function createWorkflowItem<TContext>(
   context: AgentContext<TContext>,
   workflow: Workflow,
 ): WorkflowItem {
+  const parsedWorkflow = WorkflowSchema.parse(workflow);
+
   return {
     id: context.store.generateItemId("workflow", context.thread, context.context),
     thread_id: context.thread.id,
     created_at: context.createdAt(),
     type: "workflow",
-    workflow: {
-      ...workflow,
-      tasks: [...workflow.tasks],
-      expanded: workflow.expanded ?? false,
-    },
+    workflow: parsedWorkflow,
   };
 }
 
@@ -342,6 +393,11 @@ export function finishWorkflow<TContext>(
   const workflow = context.workflowItem;
 
   if (!workflow) {
+    return null;
+  }
+
+  if (workflow.workflow.type !== "reasoning" && workflow.workflow.tasks.length === 0) {
+    context.workflowItem = null;
     return null;
   }
 
@@ -629,7 +685,8 @@ Expected:
 
 - [ ] **Step 3: Add task helper functions to `src/agents/workflows.ts`**
 
-In `src/agents/workflows.ts`, add this after `workflowAddedEvent(...)`:
+In `src/agents/workflows.ts`, import `TaskSchema` as a value and `Task` as a
+type from `../types/core`, then add this after `workflowAddedEvent(...)`:
 
 ```ts
 export function createThoughtTask(content: string): ThoughtTask {
@@ -673,8 +730,9 @@ export function workflowTaskUpdatedEvent(
 }
 
 export function appendWorkflowTask(workflow: WorkflowItem, task: Task): ThreadItemUpdatedEvent {
-  workflow.workflow.tasks.push(task);
-  return workflowTaskAddedEvent(workflow, task, workflow.workflow.tasks.length - 1);
+  const parsedTask = TaskSchema.parse(task);
+  workflow.workflow.tasks.push(parsedTask);
+  return workflowTaskAddedEvent(workflow, parsedTask, workflow.workflow.tasks.length - 1);
 }
 
 export function updateWorkflowTaskEvent(
@@ -686,8 +744,9 @@ export function updateWorkflowTaskEvent(
     throw new RangeError("Workflow task index is out of range");
   }
 
-  workflow.workflow.tasks[taskIndex] = task;
-  return workflowTaskUpdatedEvent(workflow, task, taskIndex);
+  const parsedTask = TaskSchema.parse(task);
+  workflow.workflow.tasks[taskIndex] = parsedTask;
+  return workflowTaskUpdatedEvent(workflow, parsedTask, taskIndex);
 }
 ```
 

@@ -4,12 +4,19 @@ import { convertTextContentPart, defaultResponseStreamConverter } from "./annota
 import type { ResponseStreamConverter } from "./annotations";
 import type { AgentContext } from "./context";
 import type { AgentStreamInput, StreamAgentResponseOptions, ToolCallMetadata } from "./types";
+import {
+  appendWorkflowTask,
+  createReasoningWorkflowItem,
+  createThoughtTask,
+  finishWorkflow,
+  type ThoughtTask,
+  updateWorkflowTaskEvent,
+  workflowAddedEvent,
+} from "./workflows";
 
 type UnknownRecord = Record<string, unknown>;
 
 type GeneratedImageItem = Extract<ThreadItem, { type: "generated_image" }>;
-type WorkflowItem = Extract<ThreadItem, { type: "workflow" }>;
-type ThoughtTask = Extract<WorkflowItem["workflow"]["tasks"][number], { type: "thought" }>;
 
 interface GeneratedImageState {
   callId: string | null;
@@ -170,28 +177,6 @@ function generatedImageItem<TContext>(
   };
 }
 
-function workflowItem<TContext>(context: AgentContext<TContext>, itemId: string): WorkflowItem {
-  return {
-    id: itemId,
-    thread_id: context.thread.id,
-    created_at: context.createdAt(),
-    type: "workflow",
-    workflow: {
-      type: "reasoning",
-      tasks: [],
-      expanded: false,
-    },
-  };
-}
-
-function thoughtTask(content: string): ThoughtTask {
-  return {
-    type: "thought",
-    content,
-    status_indicator: "none",
-  };
-}
-
 function matchingStreamingThought(
   state: AssistantTextState,
   itemId: string | null,
@@ -208,45 +193,6 @@ function matchingStreamingThought(
   }
 
   return null;
-}
-
-function durationSeconds(startedAt: string, endedAt: string): number {
-  const started = Date.parse(startedAt);
-  const ended = Date.parse(endedAt);
-
-  if (!Number.isFinite(started) || !Number.isFinite(ended)) {
-    return 0;
-  }
-
-  return Math.max(0, Math.floor((ended - started) / 1000));
-}
-
-function endActiveWorkflow<TContext>(
-  context: AgentContext<TContext>,
-): Extract<ThreadStreamEvent, { type: "thread.item.done" }> | null {
-  const workflow = context.workflowItem;
-
-  if (!workflow) {
-    return null;
-  }
-
-  const endedAt = context.createdAt();
-  const summary =
-    workflow.workflow.summary ?? { duration: durationSeconds(workflow.created_at, endedAt) };
-  const doneItem: WorkflowItem = {
-    ...workflow,
-    workflow: {
-      ...workflow.workflow,
-      summary,
-      expanded: false,
-    },
-  };
-  context.workflowItem = null;
-
-  return {
-    type: "thread.item.done",
-    item: doneItem,
-  };
 }
 
 function assistantContentFromItem(
@@ -304,7 +250,7 @@ function assistantMessageAddedEvents<TContext>(
 ): ThreadStreamEvent[] {
   state.activeItemId = itemId;
   const events: ThreadStreamEvent[] = [];
-  const workflowDone = endActiveWorkflow(context);
+  const workflowDone = finishWorkflow(context);
 
   if (workflowDone) {
     events.push(workflowDone);
@@ -459,16 +405,10 @@ async function convertSdkEvent<TContext>(
           return [];
         }
 
-        const itemId = context.store.generateItemId("workflow", context.thread, context.context);
-        const workflow = workflowItem(context, itemId);
+        const workflow = createReasoningWorkflowItem(context);
         context.workflowItem = workflow;
 
-        return [
-          {
-            type: "thread.item.added",
-            item: workflow,
-          },
-        ];
+        return [workflowAddedEvent(workflow)];
       }
 
       if (item.type === "image_generation_call") {
@@ -530,21 +470,11 @@ async function convertSdkEvent<TContext>(
       }
 
       if (workflow.workflow.type === "reasoning" && workflow.workflow.tasks.length === 0) {
-        const task = thoughtTask(delta);
-        state.streamingThought = { itemId, summaryIndex, task };
-        workflow.workflow.tasks.push(task);
+        const task = createThoughtTask(delta);
+        const event = appendWorkflowTask(workflow, task);
+        state.streamingThought = { itemId, summaryIndex, task: workflow.workflow.tasks[0] as ThoughtTask };
 
-        return [
-          {
-            type: "thread.item.updated",
-            item_id: workflow.id,
-            update: {
-              type: "workflow.task.added",
-              task_index: 0,
-              task,
-            },
-          },
-        ];
+        return [event];
       }
 
       const streamingThought = matchingStreamingThought(state, itemId, summaryIndex);
@@ -560,17 +490,10 @@ async function convertSdkEvent<TContext>(
         return [];
       }
 
-      return [
-        {
-          type: "thread.item.updated",
-          item_id: workflow.id,
-          update: {
-            type: "workflow.task.updated",
-            task_index: taskIndex,
-            task: streamingThought.task,
-          },
-        },
-      ];
+      const event = updateWorkflowTaskEvent(workflow, streamingThought.task, taskIndex);
+      streamingThought.task = workflow.workflow.tasks[taskIndex] as ThoughtTask;
+
+      return [event];
     }
 
     case "response.reasoning_summary_text.done": {
@@ -594,33 +517,11 @@ async function convertSdkEvent<TContext>(
           return [];
         }
 
-        return [
-          {
-            type: "thread.item.updated",
-            item_id: workflow.id,
-            update: {
-              type: "workflow.task.updated",
-              task_index: taskIndex,
-              task: streamingThought.task,
-            },
-          },
-        ];
+        return [updateWorkflowTaskEvent(workflow, streamingThought.task, taskIndex)];
       }
 
-      const task = thoughtTask(text);
-      workflow.workflow.tasks.push(task);
-
-      return [
-        {
-          type: "thread.item.updated",
-          item_id: workflow.id,
-          update: {
-            type: "workflow.task.added",
-            task_index: workflow.workflow.tasks.length - 1,
-            task,
-          },
-        },
-      ];
+      const task = createThoughtTask(text);
+      return [appendWorkflowTask(workflow, task)];
     }
 
     case "response.image_generation_call.partial_image": {
