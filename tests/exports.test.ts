@@ -12,6 +12,7 @@ import {
   ThreadMetadataSchema,
   WidgetTemplate,
   createActionConfig,
+  createChatKitHandler,
   decodeJsonBytes,
   diffWidget,
   encodeJsonBytes,
@@ -28,6 +29,7 @@ describe("public exports", () => {
     expect(typeof BaseStore).toBe("function");
     expect(typeof SQLiteStore).toBe("function");
     expect(ChatKitServer).toBeDefined();
+    expect(typeof createChatKitHandler).toBe("function");
     expect(StreamingResult).toBeDefined();
     expect(NonStreamingResult).toBeDefined();
     expect(decodeJsonBytes(encodeJsonBytes({ ok: true }))).toEqual({ ok: true });

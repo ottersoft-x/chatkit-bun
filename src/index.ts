@@ -1,5 +1,6 @@
 export * from "./actions";
 export * from "./errors";
+export * from "./http";
 export * from "./serialization";
 export * from "./server";
 export * from "./sqlite-store";
