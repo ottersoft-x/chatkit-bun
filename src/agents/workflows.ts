@@ -102,7 +102,11 @@ export function updateWorkflowTaskEvent(
   task: Task,
   taskIndex: number,
 ): ThreadItemUpdatedEvent {
-  if (taskIndex < 0 || taskIndex >= workflow.workflow.tasks.length) {
+  if (
+    !Number.isInteger(taskIndex) ||
+    taskIndex < 0 ||
+    taskIndex >= workflow.workflow.tasks.length
+  ) {
     throw new RangeError("Workflow task index is out of range");
   }
 

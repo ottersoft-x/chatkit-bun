@@ -781,6 +781,22 @@ describe("AgentContext", () => {
     ]);
   });
 
+  test("updateWorkflowTask rejects non-integer task indexes before mutating state", () => {
+    const agentContext = createContext();
+
+    agentContext.addWorkflowTask({ type: "custom", title: "Fetch data", status_indicator: "loading" });
+
+    expect(() =>
+      agentContext.updateWorkflowTask(
+        { type: "custom", title: "Fetch data", status_indicator: "complete" },
+        0.5,
+      ),
+    ).toThrow("Workflow task index is out of range");
+    expect(agentContext.workflowItem?.workflow.tasks).toEqual([
+      { type: "custom", title: "Fetch data", status_indicator: "loading" },
+    ]);
+  });
+
   test("addWorkflowTask clones caller-provided tasks", async () => {
     const agentContext = createContext();
     const task = { type: "custom" as const, title: "Fetch data", status_indicator: "loading" as const };
