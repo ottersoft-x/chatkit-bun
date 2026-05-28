@@ -1,5 +1,6 @@
 import type { Task, ThreadItem, Workflow, WorkflowSummary } from "../types/core";
 import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
+import { streamWidget as streamWidgetEvents, type WidgetRoot } from "../widgets";
 import type { AgentContextOptions, JsonObject } from "./types";
 import {
   appendWorkflowTask,
@@ -101,6 +102,19 @@ export class AgentContext<TContext> {
 
   stream(event: ThreadStreamEvent): void {
     this.queue.push(ThreadStreamEventSchema.parse(event));
+  }
+
+  async streamWidget(
+    widget: WidgetRoot | AsyncIterable<WidgetRoot>,
+    copyText?: string | null,
+  ): Promise<void> {
+    for await (const event of streamWidgetEvents(this.thread, widget, {
+      copyText,
+      generateId: (itemType) => this.store.generateItemId(itemType, this.thread, this.context),
+      now: () => this.createdAt(),
+    })) {
+      this.stream(event);
+    }
   }
 
   events(): AsyncIterable<ThreadStreamEvent> {

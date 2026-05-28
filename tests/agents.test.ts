@@ -13,6 +13,7 @@ import type {
   WorkflowSummary,
 } from "../src/types/core";
 import type { ThreadStreamEvent } from "../src/types/server";
+import { Card, Text } from "../src/widgets";
 
 interface RequestContext {
   userId: string;
@@ -1493,6 +1494,203 @@ describe("streamAgentResponse", () => {
       { type: "thread.item.added", item: sdkHiddenContextItem() },
     ]);
     expect(store.savedThreadItems.at(0)?.item.id).toBe("wf_previous");
+  });
+
+  test("returns widget items streamed through the agent context", async () => {
+    const agentContext = createContext();
+
+    await agentContext.streamWidget(
+      Card({ children: [Text({ value: "Hello, world!" })] }),
+      "Hello, world!",
+    );
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "widget",
+          widget: {
+            type: "Card",
+            children: [{ type: "Text", value: "Hello, world!" }],
+          },
+          copy_text: "Hello, world!",
+        },
+      },
+    ]);
+  });
+
+  test("returns streamed widget text deltas through the agent context", async () => {
+    const agentContext = createContext();
+
+    async function* widgets() {
+      yield Card({ children: [Text({ id: "text", value: "", streaming: true })] });
+      yield Card({ children: [Text({ id: "text", value: "Hello, world", streaming: true })] });
+    }
+
+    await agentContext.streamWidget(widgets());
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "widget",
+          widget: {
+            type: "Card",
+            children: [{ type: "Text", id: "text", value: "", streaming: true }],
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "message_generated",
+        update: {
+          type: "widget.streaming_text.value_delta",
+          component_id: "text",
+          delta: "Hello, world",
+          done: false,
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "widget",
+          widget: {
+            type: "Card",
+            children: [{ type: "Text", id: "text", value: "Hello, world", streaming: true }],
+          },
+        },
+      },
+    ]);
+  });
+
+  test("returns streamed widget root replacements through the agent context", async () => {
+    const agentContext = createContext();
+
+    async function* widgets() {
+      yield Card({ children: [Text({ id: "text", value: "Hello!" })] });
+      yield Card({ children: [Text({ key: "other text", value: "World!", streaming: false })] });
+    }
+
+    await agentContext.streamWidget(widgets());
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "widget",
+          widget: {
+            type: "Card",
+            children: [{ type: "Text", id: "text", value: "Hello!" }],
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "message_generated",
+        update: {
+          type: "widget.root.updated",
+          widget: {
+            type: "Card",
+            children: [{ type: "Text", key: "other text", value: "World!", streaming: false }],
+          },
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "widget",
+          widget: {
+            type: "Card",
+            children: [{ type: "Text", key: "other text", value: "World!", streaming: false }],
+          },
+        },
+      },
+    ]);
+  });
+
+  test("ends active workflows before widgets streamed through the agent context", async () => {
+    const store = new TestStore();
+    const agentContext = createContext(store);
+
+    agentContext.startWorkflow({
+      type: "custom",
+      tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+      expanded: true,
+    });
+    await agentContext.streamWidget(Card({ children: [Text({ value: "Result" })] }));
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+            expanded: true,
+          },
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+            summary: { duration: 0 },
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "widget",
+          widget: {
+            type: "Card",
+            children: [{ type: "Text", value: "Result" }],
+          },
+        },
+      },
+    ]);
+    expect(store.savedThreadItems).toEqual([]);
   });
 
   test("yields context-only events when the SDK stream is empty", async () => {
