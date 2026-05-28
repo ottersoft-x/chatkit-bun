@@ -1,4 +1,4 @@
-import type { ThreadItem, Workflow, WorkflowSummary } from "../types/core";
+import { WorkflowSchema, type ThreadItem, type Workflow, type WorkflowSummary } from "../types/core";
 import type { ThreadStreamEvent } from "../types/server";
 import type { AgentContext } from "./context";
 
@@ -12,16 +12,14 @@ export function createWorkflowItem<TContext>(
   context: AgentContext<TContext>,
   workflow: Workflow,
 ): WorkflowItem {
+  const parsedWorkflow = WorkflowSchema.parse(workflow);
+
   return {
     id: context.store.generateItemId("workflow", context.thread, context.context),
     thread_id: context.thread.id,
     created_at: context.createdAt(),
     type: "workflow",
-    workflow: {
-      ...workflow,
-      tasks: [...workflow.tasks],
-      expanded: workflow.expanded ?? false,
-    },
+    workflow: parsedWorkflow,
   };
 }
 
@@ -65,6 +63,11 @@ export function finishWorkflow<TContext>(
   const workflow = context.workflowItem;
 
   if (!workflow) {
+    return null;
+  }
+
+  if (workflow.workflow.type !== "reasoning" && workflow.workflow.tasks.length === 0) {
+    context.workflowItem = null;
     return null;
   }
 

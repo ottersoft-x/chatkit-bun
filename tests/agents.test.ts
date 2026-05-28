@@ -430,6 +430,59 @@ describe("AgentContext", () => {
     });
   });
 
+  test("ending a deferred empty custom workflow clears state without emitting an orphan done event", async () => {
+    const agentContext = createContext();
+
+    agentContext.startWorkflow({ type: "custom", tasks: [], expanded: false });
+    agentContext.endWorkflow();
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([]);
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
+  test("startWorkflow clones caller-provided workflow tasks", async () => {
+    const agentContext = createContext();
+    const task = { type: "custom" as const, title: "Fetch data", status_indicator: "loading" as const };
+
+    agentContext.startWorkflow({ type: "custom", tasks: [task], expanded: false });
+    task.title = "Mutated outside context";
+    agentContext.endWorkflow();
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Fetch data", status_indicator: "loading" }],
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Fetch data", status_indicator: "loading" }],
+            summary: { duration: 0 },
+            expanded: false,
+          },
+        },
+      },
+    ]);
+  });
+
   test("ends workflows with duration summaries by default", async () => {
     const agentContext = createContext();
 
