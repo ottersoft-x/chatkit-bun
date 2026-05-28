@@ -150,7 +150,7 @@ export function Input(props: InputProps): DynamicWidgetComponent {
   return component("Input", props);
 }
 
-export type LabelProps = WidgetProps & { label: string };
+export type LabelProps = WidgetProps & { value: string; fieldName: string };
 export function Label(props: LabelProps): DynamicWidgetComponent {
   return component("Label", props);
 }
@@ -172,8 +172,14 @@ export function Transition(props: TransitionProps): DynamicWidgetComponent {
 
 export type ChartProps = WidgetProps & {
   data: WidgetJson[];
-  xAxis?: string;
-  yAxis?: string;
+  series: WidgetJson[];
+  xAxis: string;
+  showYAxis?: boolean;
+  showLegend?: boolean;
+  showTooltip?: boolean;
+  barGap?: string | number;
+  barCategoryGap?: string | number;
+  flex?: string | number;
 };
 export function Chart(props: ChartProps): DynamicWidgetComponent {
   return component("Chart", props);

@@ -70,10 +70,6 @@ function requiresFullReplace(before: WidgetNode, after: WidgetNode, isWidgetNode
     const afterValue = after[key];
 
     if (isWidgetNode && key === "value" && canStreamValueChange(before, after)) continue;
-    if (isWidgetNode && key === "streaming" && isStreamingText(before) && isStreamingText(after)) {
-      continue;
-    }
-
     if (valueRequiresFullReplace(beforeValue, afterValue, isWidgetNode && key === "children")) {
       return true;
     }

@@ -1,4 +1,3 @@
-import { existsSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 
 import nunjucks from "nunjucks";
@@ -67,10 +66,7 @@ function resolveWidgetPath(path: string): string {
 
   const callerPath = callerDirectory();
   if (callerPath != null) {
-    const candidate = join(callerPath, path);
-    if (existsSync(candidate)) {
-      return candidate;
-    }
+    return join(callerPath, path);
   }
 
   return join(process.cwd(), path);

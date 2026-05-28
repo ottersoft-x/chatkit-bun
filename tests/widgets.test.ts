@@ -111,6 +111,8 @@ describe("widgets", () => {
   });
 
   test("exports the Python widget component catalogue", () => {
+    const label = Label({ value: "Name", fieldName: "name" });
+    const chart = Chart({ data: [], series: [], xAxis: "x" });
     const catalogue = [
       Basic({ children: [] }),
       ListView({ children: [ListViewItem({ children: [Text({ value: "Row" })] })] }),
@@ -130,11 +132,11 @@ describe("widgets", () => {
       Select({ name: "choice", options: [{ label: "A", value: "a" }] }),
       DatePicker({ name: "date" }),
       Input({ name: "input" }),
-      Label({ label: "Name" }),
+      label,
       RadioGroup({ name: "radio", options: [{ label: "A", value: "a" }] }),
       Textarea({ name: "body" }),
       Transition({ children: Text({ value: "Child" }) }),
-      Chart({ data: [], xAxis: "x", yAxis: "y" }),
+      chart,
     ];
 
     expect(catalogue.map((component) => component.type)).toEqual([
@@ -162,6 +164,13 @@ describe("widgets", () => {
       "Transition",
       "Chart",
     ]);
+    expect(serializeWidget(Card({ children: [label, chart] }))).toEqual({
+      type: "Card",
+      children: [
+        { type: "Label", value: "Name", fieldName: "name" },
+        { type: "Chart", data: [], series: [], xAxis: "x" },
+      ],
+    });
   });
 
   const fixtureData: Record<string, Record<string, unknown> | undefined> = {
@@ -183,15 +192,19 @@ describe("widgets", () => {
 
   for (const [name, data] of Object.entries(fixtureData)) {
     test(`renders ${name}.widget`, async () => {
-      const template = await WidgetTemplate.fromFile(`tests/assets/widgets/${name}.widget`);
+      const template = await WidgetTemplate.fromFile(`assets/widgets/${name}.widget`);
       const expected = await Bun.file(`tests/assets/widgets/${name}.json`).json();
 
       expect(template.build(data)).toEqual(expected);
     });
   }
 
+  test("resolves relative template paths from the caller directory", async () => {
+    await expect(WidgetTemplate.fromFile("tests/assets/widgets/card_no_data.widget")).rejects.toThrow();
+  });
+
   test("builds Basic roots through buildBasic", async () => {
-    const template = await WidgetTemplate.fromFile("tests/assets/widgets/basic_root.widget");
+    const template = await WidgetTemplate.fromFile("assets/widgets/basic_root.widget");
     const expected = await Bun.file("tests/assets/widgets/basic_root.json").json();
 
     const widget = template.buildBasic({
@@ -204,7 +217,7 @@ describe("widgets", () => {
   });
 
   test("throws on missing template variables", async () => {
-    const template = await WidgetTemplate.fromFile("tests/assets/widgets/basic_root.widget");
+    const template = await WidgetTemplate.fromFile("assets/widgets/basic_root.widget");
 
     expect(() => template.build({ name: "Hermione Granger" })).toThrow();
   });
@@ -242,7 +255,7 @@ describe("widgets", () => {
     ]);
   });
 
-  test("diffWidget marks streaming Text deltas done when streaming stops", () => {
+  test("diffWidget replaces the root when streaming Text stops", () => {
     expect(
       diffWidget(
         Card({ children: [Text({ id: "text", value: "Hello", streaming: true })] }),
@@ -250,10 +263,11 @@ describe("widgets", () => {
       ),
     ).toEqual([
       {
-        type: "widget.streaming_text.value_delta",
-        component_id: "text",
-        delta: ", world!",
-        done: true,
+        type: "widget.root.updated",
+        widget: {
+          type: "Card",
+          children: [{ type: "Text", id: "text", value: "Hello, world!", streaming: false }],
+        },
       },
     ]);
   });
@@ -275,15 +289,15 @@ describe("widgets", () => {
   test("diffWidget returns a root replacement for primitive array prop changes", () => {
     expect(
       diffWidget(
-        Card({ children: [Chart({ data: [1], xAxis: "x", yAxis: "y" })] }),
-        Card({ children: [Chart({ data: [2], xAxis: "x", yAxis: "y" })] }),
+        Card({ children: [Chart({ data: [1], series: [], xAxis: "x" })] }),
+        Card({ children: [Chart({ data: [2], series: [], xAxis: "x" })] }),
       ),
     ).toEqual([
       {
         type: "widget.root.updated",
         widget: {
           type: "Card",
-          children: [{ type: "Chart", data: [2], xAxis: "x", yAxis: "y" }],
+          children: [{ type: "Chart", data: [2], series: [], xAxis: "x" }],
         },
       },
     ]);
@@ -292,15 +306,15 @@ describe("widgets", () => {
   test("diffWidget returns a root replacement for nested array prop changes", () => {
     expect(
       diffWidget(
-        Card({ children: [Chart({ data: [[{ value: 1 }]], xAxis: "x", yAxis: "y" })] }),
-        Card({ children: [Chart({ data: [[{ value: 2 }]], xAxis: "x", yAxis: "y" })] }),
+        Card({ children: [Chart({ data: [[{ value: 1 }]], series: [], xAxis: "x" })] }),
+        Card({ children: [Chart({ data: [[{ value: 2 }]], series: [], xAxis: "x" })] }),
       ),
     ).toEqual([
       {
         type: "widget.root.updated",
         widget: {
           type: "Card",
-          children: [{ type: "Chart", data: [[{ value: 2 }]], xAxis: "x", yAxis: "y" }],
+          children: [{ type: "Chart", data: [[{ value: 2 }]], series: [], xAxis: "x" }],
         },
       },
     ]);
@@ -309,15 +323,21 @@ describe("widgets", () => {
   test("diffWidget does not stream Text-shaped objects inside data props", () => {
     expect(
       diffWidget(
-        Card({ children: [Chart({ data: [{ type: "Text", id: "row", value: "A" }] })] }),
-        Card({ children: [Chart({ data: [{ type: "Text", id: "row", value: "AB" }] })] }),
+        Card({
+          children: [Chart({ data: [{ type: "Text", id: "row", value: "A" }], series: [], xAxis: "x" })],
+        }),
+        Card({
+          children: [Chart({ data: [{ type: "Text", id: "row", value: "AB" }], series: [], xAxis: "x" })],
+        }),
       ),
     ).toEqual([
       {
         type: "widget.root.updated",
         widget: {
           type: "Card",
-          children: [{ type: "Chart", data: [{ type: "Text", id: "row", value: "AB" }] }],
+          children: [
+            { type: "Chart", data: [{ type: "Text", id: "row", value: "AB" }], series: [], xAxis: "x" },
+          ],
         },
       },
     ]);
@@ -395,6 +415,7 @@ describe("widgets", () => {
     expect(events.map((event) => event.type)).toEqual([
       "thread.item.added",
       "thread.item.updated",
+      "thread.item.updated",
       "thread.item.done",
     ]);
     expect(events[1]).toEqual({
@@ -405,6 +426,17 @@ describe("widgets", () => {
         component_id: "text",
         delta: ", world!",
         done: false,
+      },
+    });
+    expect(events[2]).toEqual({
+      type: "thread.item.updated",
+      item_id: "msg_stream",
+      update: {
+        type: "widget.root.updated",
+        widget: {
+          type: "Card",
+          children: [{ type: "Text", id: "text", value: "Hello, world!", streaming: false }],
+        },
       },
     });
   });
