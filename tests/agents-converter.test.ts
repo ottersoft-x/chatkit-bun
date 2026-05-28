@@ -132,6 +132,58 @@ describe("ThreadItemConverter", () => {
     ]);
   });
 
+  test("quotes the last user message even when later items are non-user replay context", async () => {
+    const input = await simpleToAgentInput([
+      userMessage({
+        id: "msg_1",
+        content: [{ type: "input_text", text: "Use the previous result" }],
+        quoted_text: "Selected paragraph",
+      }),
+      {
+        id: "ctc_done",
+        thread_id: threadId,
+        created_at: now,
+        type: "client_tool_call",
+        status: "completed",
+        name: "get_selection",
+        arguments: {},
+        call_id: "call_selection",
+        output: { selected: "paragraph" },
+      },
+    ]);
+
+    expect(input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Use the previous result" }],
+      },
+      {
+        type: "message",
+        role: "user",
+        content: [
+          {
+            type: "input_text",
+            text: "The user is referring to this in particular: \nSelected paragraph",
+          },
+        ],
+      },
+      {
+        type: "function_call",
+        name: "get_selection",
+        callId: "call_selection",
+        arguments: JSON.stringify({}),
+      },
+      {
+        type: "function_call_result",
+        name: "get_selection",
+        callId: "call_selection",
+        status: "completed",
+        output: JSON.stringify({ selected: "paragraph" }),
+      },
+    ]);
+  });
+
   test("converts mixed user assistant and widget items", async () => {
     const input = await simpleToAgentInput([
       userMessage({ id: "msg_1", content: [{ type: "input_text", text: "Hello!" }] }),

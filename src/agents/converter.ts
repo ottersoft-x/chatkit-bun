@@ -236,12 +236,13 @@ export class ThreadItemConverter {
 
   async toAgentInput(threadItems: ThreadItem | readonly ThreadItem[]): Promise<AgentInputItem[]> {
     const items = Array.isArray(threadItems) ? [...threadItems] : [threadItems];
+    const lastUserMessageIndex = items.findLastIndex((item) => item.type === "user_message");
     const output: AgentInputItem[] = [];
 
     for (const [index, item] of items.entries()) {
       switch (item.type) {
         case "user_message":
-          output.push(...normalizeInput(await this.userMessageToInput(item, index === items.length - 1)));
+          output.push(...normalizeInput(await this.userMessageToInput(item, index === lastUserMessageIndex)));
           break;
         case "assistant_message":
           output.push(...normalizeInput(await this.assistantMessageToInput(item)));
