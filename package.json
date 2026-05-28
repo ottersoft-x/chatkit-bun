@@ -12,6 +12,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@openai/agents": "^0.11.5",
     "nunjucks": "^3.2.4",
     "zod": "^4.4.3"
   },

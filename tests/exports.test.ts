@@ -3,9 +3,11 @@ import { describe, expect, test } from "bun:test";
 import * as exports from "../src";
 import {
   ActionConfigSchema,
+  AgentContext,
   BaseStore,
   Card,
   ChatKitServer,
+  ClientToolCall,
   NonStreamingResult,
   SQLiteStore,
   StreamingResult,
@@ -17,6 +19,7 @@ import {
   diffWidget,
   encodeJsonBytes,
   defaultGenerateId,
+  streamAgentResponse,
   streamWidget,
 } from "../src";
 
@@ -40,5 +43,8 @@ describe("public exports", () => {
     expect(typeof WidgetTemplate).toBe("function");
     expect(typeof diffWidget).toBe("function");
     expect(typeof streamWidget).toBe("function");
+    expect(typeof AgentContext).toBe("function");
+    expect(typeof ClientToolCall).toBe("function");
+    expect(typeof streamAgentResponse).toBe("function");
   });
 });

@@ -18,6 +18,7 @@ describe("package metadata", () => {
 
   test("declares only the required runtime and development dependencies", () => {
     expect(Object.keys(packageJson.dependencies ?? {}).sort()).toEqual([
+      "@openai/agents",
       "nunjucks",
       "zod",
     ]);
@@ -28,6 +29,7 @@ describe("package metadata", () => {
     ]);
     expect(packageJson.peerDependencies).toEqual({ typescript: "^5" });
 
+    expect(typeof packageJson.dependencies?.["@openai/agents"]).toBe("string");
     expect(typeof packageJson.dependencies?.nunjucks).toBe("string");
     expect(typeof packageJson.dependencies?.zod).toBe("string");
     expect(typeof packageJson.devDependencies?.["@types/bun"]).toBe("string");
