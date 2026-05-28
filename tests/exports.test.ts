@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import * as exports from "../src";
-import type { ResponseStreamConverterOptions } from "../src";
+import type { ResponseStreamConverterOptions, ThreadItemConverterResult } from "../src";
 import {
   ActionConfigSchema,
   AgentContext,
@@ -13,6 +13,7 @@ import {
   ResponseStreamConverter,
   SQLiteStore,
   StreamingResult,
+  ThreadItemConverter,
   ThreadMetadataSchema,
   WidgetTemplate,
   createActionConfig,
@@ -22,11 +23,13 @@ import {
   diffWidget,
   encodeJsonBytes,
   defaultGenerateId,
+  simpleToAgentInput,
   streamAgentResponse,
   streamWidget,
 } from "../src";
 
 function assertResponseStreamConverterOptions(_options: ResponseStreamConverterOptions): void {}
+function assertThreadItemConverterResult(_result: ThreadItemConverterResult): void {}
 
 describe("public exports", () => {
   test("exports foundation APIs", () => {
@@ -53,6 +56,12 @@ describe("public exports", () => {
     expect(typeof streamAgentResponse).toBe("function");
     expect(typeof ResponseStreamConverter).toBe("function");
     expect(defaultResponseStreamConverter).toBeInstanceOf(ResponseStreamConverter);
+    expect(typeof ThreadItemConverter).toBe("function");
+    expect(typeof simpleToAgentInput).toBe("function");
     assertResponseStreamConverterOptions({ partialImages: 3 });
+    assertThreadItemConverterResult(null);
+    assertThreadItemConverterResult(undefined);
+    assertThreadItemConverterResult({ type: "message", role: "user", content: "Hello" });
+    assertThreadItemConverterResult([{ type: "message", role: "assistant", status: "completed", content: [] }]);
   });
 });
