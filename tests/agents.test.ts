@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 
 import { AgentContext, ClientToolCall, streamAgentResponse } from "../src/agents";
 import { ResponseStreamConverter, defaultResponseStreamConverter } from "../src/agents/annotations";
-import { BaseStore, type StoreItemType } from "../src/store";
+import { SQLiteStore } from "../src/sqlite-store";
+import { BaseStore, type Store, type StoreItemType } from "../src/store";
 import type {
   Annotation,
   Attachment,
@@ -27,6 +28,21 @@ const thread: ThreadMetadata = {
 const requestContext: RequestContext = { userId: "user_1" };
 
 class TestStore extends BaseStore<RequestContext> {
+  readonly addedThreadItems: Array<{
+    threadId: string;
+    item: ThreadItem;
+    context: RequestContext;
+  }> = [];
+  readonly savedThreadItems: Array<{
+    threadId: string;
+    item: ThreadItem;
+    context: RequestContext;
+  }> = [];
+
+  constructor(private readonly threadItems: ThreadItem[] = []) {
+    super();
+  }
+
   override generateItemId(itemType: StoreItemType): string {
     return `${itemType}_generated`;
   }
@@ -40,13 +56,23 @@ class TestStore extends BaseStore<RequestContext> {
   }
 
   override async loadThreadItems(
-    _threadId: string,
-    _after: string | null,
-    _limit: number,
-    _order: "asc" | "desc",
-    _context: RequestContext,
+    threadId: string,
+    after: string | null,
+    limit: number,
+    order: "asc" | "desc",
+    context: RequestContext,
   ): Promise<Page<ThreadItem>> {
-    throw new Error("loadThreadItems is not used by agents tests");
+    expect(threadId).toBe(thread.id);
+    expect(after).toBeNull();
+    expect(limit).toBe(2);
+    expect(order).toBe("desc");
+    expect(context).toEqual(requestContext);
+
+    return {
+      data: structuredClone(this.threadItems.slice(0, limit)),
+      has_more: false,
+      after: null,
+    };
   }
 
   override async saveAttachment(_attachment: Attachment, _context: RequestContext): Promise<void> {
@@ -71,15 +97,15 @@ class TestStore extends BaseStore<RequestContext> {
   }
 
   override async addThreadItem(
-    _threadId: string,
-    _item: ThreadItem,
-    _context: RequestContext,
+    threadId: string,
+    item: ThreadItem,
+    context: RequestContext,
   ): Promise<void> {
-    throw new Error("addThreadItem is not used by agents tests");
+    this.addedThreadItems.push({ threadId, item: structuredClone(item), context });
   }
 
-  override async saveItem(_threadId: string, _item: ThreadItem, _context: RequestContext): Promise<void> {
-    throw new Error("saveItem is not used by agents tests");
+  override async saveItem(threadId: string, item: ThreadItem, context: RequestContext): Promise<void> {
+    this.savedThreadItems.push({ threadId, item: structuredClone(item), context });
   }
 
   override async loadItem(
@@ -141,13 +167,93 @@ class RecordingMessageIdStore extends TestStore {
   }
 }
 
-function createContext(store: TestStore = new TestStore()): AgentContext<RequestContext> {
+function createContext(store: Store<RequestContext> = new TestStore()): AgentContext<RequestContext> {
   return new AgentContext({
     thread,
     store,
     context: requestContext,
     now: () => now,
   });
+}
+
+function storedWorkflowItem(
+  overrides: Partial<Extract<ThreadItem, { type: "workflow" }>> = {},
+): Extract<ThreadItem, { type: "workflow" }> {
+  return {
+    id: "wf_previous",
+    thread_id: "thr_1",
+    created_at: now,
+    type: "workflow",
+    workflow: {
+      type: "custom",
+      tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+      expanded: true,
+    },
+    ...overrides,
+  };
+}
+
+function storedClientToolCallItem(): Extract<ThreadItem, { type: "client_tool_call" }> {
+  return {
+    id: "fc_previous",
+    thread_id: "thr_1",
+    created_at: now,
+    type: "client_tool_call",
+    status: "pending",
+    call_id: "call_previous",
+    name: "get_selection",
+    arguments: {},
+  };
+}
+
+function storedAssistantMessageItem(): Extract<ThreadItem, { type: "assistant_message" }> {
+  return {
+    id: "msg_previous",
+    thread_id: "thr_1",
+    created_at: now,
+    type: "assistant_message",
+    content: [],
+  };
+}
+
+function contextWidgetItem(): Extract<ThreadItem, { type: "widget" }> {
+  return {
+    id: "widget_1",
+    thread_id: "thr_1",
+    created_at: now,
+    type: "widget",
+    widget: { type: "Card", props: { title: "Result" } },
+  };
+}
+
+function contextGeneratedImageItem(): Extract<ThreadItem, { type: "generated_image" }> {
+  return {
+    id: "generated_image_1",
+    thread_id: "thr_1",
+    created_at: now,
+    type: "generated_image",
+    image: null,
+  };
+}
+
+function hiddenContextItem(): Extract<ThreadItem, { type: "hidden_context_item" }> {
+  return {
+    id: "hidden_1",
+    thread_id: "thr_1",
+    created_at: now,
+    type: "hidden_context_item",
+    content: { secret: true },
+  };
+}
+
+function sdkHiddenContextItem(): Extract<ThreadItem, { type: "sdk_hidden_context" }> {
+  return {
+    id: "sdk_hidden_1",
+    thread_id: "thr_1",
+    created_at: now,
+    type: "sdk_hidden_context",
+    content: "internal",
+  };
 }
 
 async function collect(iterable: AsyncIterable<ThreadStreamEvent>): Promise<ThreadStreamEvent[]> {
@@ -900,6 +1006,495 @@ describe("AgentContext", () => {
 });
 
 describe("streamAgentResponse", () => {
+  test("resumes the latest stored workflow before streaming", async () => {
+    const workflow = storedWorkflowItem();
+    const store = new TestStore([workflow]);
+    const agentContext = createContext(store);
+
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawResponse({
+            type: "response.reasoning_summary_text.done",
+            item_id: "reasoning_1",
+            summary_index: 0,
+            text: "Analyze",
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.updated",
+        item_id: "wf_previous",
+        update: {
+          type: "workflow.task.added",
+          task_index: 1,
+          task: { type: "thought", content: "Analyze", status_indicator: "none" },
+        },
+      },
+    ]);
+  });
+
+  test("resumes the workflow before a latest client tool call", async () => {
+    const workflow = storedWorkflowItem();
+    const store = new TestStore([storedClientToolCallItem(), workflow]);
+    const agentContext = createContext(store);
+
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawResponse({
+            type: "response.reasoning_summary_text.done",
+            item_id: "reasoning_1",
+            summary_index: 0,
+            text: "Analyze",
+          }),
+        ]),
+      ),
+    );
+
+    expect(events[0]).toEqual({
+      type: "thread.item.updated",
+      item_id: "wf_previous",
+      update: {
+        type: "workflow.task.added",
+        task_index: 1,
+        task: { type: "thought", content: "Analyze", status_indicator: "none" },
+      },
+    });
+  });
+
+  test("does not resume workflows when the latest stored item is not resumable", async () => {
+    const store = new TestStore([storedAssistantMessageItem(), storedWorkflowItem()]);
+    const agentContext = createContext(store);
+
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "reasoning", id: "reasoning_1" },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: { type: "reasoning", tasks: [], expanded: false },
+        },
+      },
+    ]);
+  });
+
+  test("silently persists active workflows at normal stream completion", async () => {
+    const store = new TestStore();
+    const agentContext = createContext(store);
+
+    agentContext.startWorkflow({
+      type: "custom",
+      tasks: [{ type: "custom", title: "Prepare", status_indicator: "loading" }],
+      expanded: true,
+    });
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Prepare", status_indicator: "loading" }],
+            expanded: true,
+          },
+        },
+      },
+    ]);
+    expect(store.savedThreadItems).toEqual([
+      {
+        threadId: "thr_1",
+        context: requestContext,
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Prepare", status_indicator: "loading" }],
+            expanded: true,
+          },
+        },
+      },
+    ]);
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
+  test("silently persists helper-created workflows with all queued tasks", async () => {
+    const store = new TestStore();
+    const agentContext = createContext(store);
+
+    agentContext.addWorkflowTask({
+      type: "custom",
+      title: "Prepare",
+      status_indicator: "complete",
+    });
+    agentContext.addWorkflowTask({
+      type: "custom",
+      title: "Analyze",
+      status_indicator: "loading",
+    });
+    agentContext.closeEvents();
+
+    await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(store.savedThreadItems.at(0)?.item).toMatchObject({
+      id: "workflow_generated",
+      type: "workflow",
+      workflow: {
+        type: "custom",
+        tasks: [
+          { type: "custom", title: "Prepare", status_indicator: "complete" },
+          { type: "custom", title: "Analyze", status_indicator: "loading" },
+        ],
+      },
+    });
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
+  test("silently persists resumed open workflows without duplicating stored ids", async () => {
+    const store = new SQLiteStore<RequestContext>({
+      path: ":memory:",
+      getUserId: (context) => context.userId,
+    });
+    const workflow = storedWorkflowItem();
+
+    try {
+      await store.saveThread(thread, requestContext);
+      await store.addThreadItem(thread.id, workflow, requestContext);
+
+      const agentContext = createContext(store);
+      const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+      expect(events).toEqual([]);
+      await expect(store.loadItem(thread.id, workflow.id, requestContext)).resolves.toMatchObject({
+        id: workflow.id,
+        type: "workflow",
+      });
+      expect(agentContext.workflowItem).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
+  test("keeps silently persisted resumed workflows in the two-item resume window", async () => {
+    const store = new SQLiteStore<RequestContext>({
+      path: ":memory:",
+      getUserId: (context) => context.userId,
+    });
+    const olderAssistant = {
+      ...storedAssistantMessageItem(),
+      id: "msg_older",
+      created_at: "2026-05-26T00:00:00.000Z",
+    };
+    const workflow = storedWorkflowItem({
+      created_at: "2026-05-26T00:01:00.000Z",
+    });
+    const existingToolCall = {
+      ...storedClientToolCallItem(),
+      id: "fc_existing",
+      created_at: "2026-05-26T00:02:00.000Z",
+      call_id: "call_existing",
+    };
+
+    try {
+      await store.saveThread(thread, requestContext);
+      await store.addThreadItem(thread.id, olderAssistant, requestContext);
+      await store.addThreadItem(thread.id, workflow, requestContext);
+      await store.addThreadItem(thread.id, existingToolCall, requestContext);
+
+      const agentContext = createContext(store);
+      agentContext.setClientToolCall(new ClientToolCall("get_selection"));
+
+      const events = await collect(
+        streamAgentResponse(
+          agentContext,
+          streamedRun([
+            {
+              type: "run_item_stream_event",
+              item: {
+                type: "tool_call_item",
+                raw_item: {
+                  type: "function_call",
+                  id: "fc_current",
+                  call_id: "call_current",
+                  name: "get_selection",
+                },
+              },
+            },
+          ]),
+        ),
+      );
+
+      expect(events).toEqual([
+        {
+          type: "thread.item.done",
+          item: {
+            id: "fc_current",
+            thread_id: "thr_1",
+            created_at: now,
+            type: "client_tool_call",
+            status: "pending",
+            call_id: "call_current",
+            name: "get_selection",
+            arguments: {},
+          },
+        },
+      ]);
+
+      const clientToolCall = events[0]?.type === "thread.item.done" ? events[0].item : null;
+      expect(clientToolCall?.type).toBe("client_tool_call");
+      await store.saveItem(thread.id, clientToolCall!, requestContext);
+
+      const resumeWindow = await store.loadThreadItems(thread.id, null, 2, "desc", requestContext);
+      const persistedWorkflow = resumeWindow.data.find(
+        (item): item is Extract<ThreadItem, { type: "workflow" }> =>
+          item.type === "workflow" && item.id === workflow.id,
+      );
+
+      expect(resumeWindow.data.map((item) => item.id)).toContain(workflow.id);
+      expect(persistedWorkflow).toMatchObject({
+        id: workflow.id,
+        type: "workflow",
+        created_at: now,
+      });
+      expect(persistedWorkflow?.workflow).not.toHaveProperty("summary");
+      expect(agentContext.workflowItem).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+
+  test("does not silently persist workflows that ended during the stream", async () => {
+    const store = new TestStore();
+    const agentContext = createContext(store);
+
+    agentContext.startWorkflow({
+      type: "custom",
+      tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+      expanded: true,
+    });
+    agentContext.endWorkflow({ title: "Prepared" });
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events.at(-1)).toEqual({
+      type: "thread.item.done",
+      item: {
+        id: "workflow_generated",
+        thread_id: "thr_1",
+        created_at: now,
+        type: "workflow",
+        workflow: {
+          type: "custom",
+          tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+          summary: { title: "Prepared" },
+          expanded: false,
+        },
+      },
+    });
+    expect(store.addedThreadItems).toEqual([]);
+    expect(store.savedThreadItems).toEqual([]);
+  });
+
+  test("persists open workflows before yielding pending client tool calls", async () => {
+    class OrderRecordingStore extends TestStore {
+      readonly order: string[] = [];
+
+      override async saveItem(
+        threadId: string,
+        item: ThreadItem,
+        context: RequestContext,
+      ): Promise<void> {
+        this.order.push(`persist:${item.type}`);
+        await super.saveItem(threadId, item, context);
+      }
+    }
+
+    const store = new OrderRecordingStore();
+    const agentContext = createContext(store);
+
+    agentContext.startWorkflow({
+      type: "custom",
+      tasks: [{ type: "custom", title: "Prepare", status_indicator: "loading" }],
+      expanded: true,
+    });
+    agentContext.setClientToolCall(new ClientToolCall("get_selection"));
+    agentContext.closeEvents();
+
+    const iterator = streamAgentResponse(agentContext, streamedRun([]))[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Prepare", status_indicator: "loading" }],
+            expanded: true,
+          },
+        },
+      },
+    });
+
+    await expect(iterator.next()).resolves.toEqual({
+      done: false,
+      value: {
+        type: "thread.item.done",
+        item: {
+          id: "tool_call_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "client_tool_call",
+          status: "pending",
+          call_id: "tool_call_generated",
+          name: "get_selection",
+          arguments: {},
+        },
+      },
+    });
+    store.order.push("yield:client_tool_call");
+
+    expect(store.order).toEqual(["persist:workflow", "yield:client_tool_call"]);
+    await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+    expect(store.savedThreadItems.map((entry) => entry.item.type)).toEqual(["workflow"]);
+  });
+
+  test("ends active workflows before context-emitted widget items", async () => {
+    const store = new TestStore();
+    const agentContext = createContext(store);
+    const widget = contextWidgetItem();
+
+    agentContext.startWorkflow({
+      type: "custom",
+      tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+      expanded: true,
+    });
+    agentContext.stream({ type: "thread.item.added", item: widget });
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+            expanded: true,
+          },
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+            summary: { duration: 0 },
+            expanded: false,
+          },
+        },
+      },
+      { type: "thread.item.added", item: widget },
+    ]);
+    expect(store.savedThreadItems).toEqual([]);
+  });
+
+  test("ends active workflows before context-emitted generated image items", async () => {
+    const agentContext = createContext();
+    const generatedImage = contextGeneratedImageItem();
+
+    agentContext.addWorkflowTask({
+      type: "custom",
+      title: "Prepare",
+      status_indicator: "complete",
+    });
+    agentContext.stream({ type: "thread.item.done", item: generatedImage });
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events.at(-2)).toEqual({
+      type: "thread.item.done",
+      item: {
+        id: "workflow_generated",
+        thread_id: "thr_1",
+        created_at: now,
+        type: "workflow",
+        workflow: {
+          type: "custom",
+          tasks: [{ type: "custom", title: "Prepare", status_indicator: "complete" }],
+          summary: { duration: 0 },
+          expanded: false,
+        },
+      },
+    });
+    expect(events.at(-1)).toEqual({ type: "thread.item.done", item: generatedImage });
+  });
+
+  test("does not end active workflows before client tool or hidden context items", async () => {
+    const workflow = storedWorkflowItem();
+    const store = new TestStore([workflow]);
+    const agentContext = createContext(store);
+
+    agentContext.stream({ type: "thread.item.done", item: storedClientToolCallItem() });
+    agentContext.stream({ type: "thread.item.added", item: hiddenContextItem() });
+    agentContext.stream({ type: "thread.item.added", item: sdkHiddenContextItem() });
+    agentContext.closeEvents();
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      { type: "thread.item.done", item: storedClientToolCallItem() },
+      { type: "thread.item.added", item: hiddenContextItem() },
+      { type: "thread.item.added", item: sdkHiddenContextItem() },
+    ]);
+    expect(store.savedThreadItems.at(0)?.item.id).toBe("wf_previous");
+  });
+
   test("yields context-only events when the SDK stream is empty", async () => {
     const agentContext = createContext();
 
@@ -1288,7 +1883,8 @@ describe("streamAgentResponse", () => {
   });
 
   test("maps reasoning summary streams into workflow thought tasks", async () => {
-    const agentContext = createContext();
+    const store = new TestStore();
+    const agentContext = createContext(store);
     const events = await collect(
       streamAgentResponse(
         agentContext,
@@ -1389,10 +1985,27 @@ describe("streamAgentResponse", () => {
         },
       },
     ]);
-    expect(agentContext.workflowItem?.workflow.tasks).toEqual([
-      { type: "thought", content: "Thinking 1", status_indicator: "none" },
-      { type: "thought", content: "Thinking 2", status_indicator: "none" },
+    expect(store.savedThreadItems).toEqual([
+      {
+        threadId: "thr_1",
+        context: requestContext,
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "reasoning",
+            tasks: [
+              { type: "thought", content: "Thinking 1", status_indicator: "none" },
+              { type: "thought", content: "Thinking 2", status_indicator: "none" },
+            ],
+            expanded: false,
+          },
+        },
+      },
     ]);
+    expect(agentContext.workflowItem).toBeNull();
   });
 
   test("maps nested provider reasoning events through the raw model path", async () => {
