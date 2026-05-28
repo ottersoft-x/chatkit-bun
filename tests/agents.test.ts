@@ -1,3 +1,9 @@
+import {
+  InputGuardrailTripwireTriggered,
+  OutputGuardrailTripwireTriggered,
+  ToolInputGuardrailTripwireTriggered,
+  ToolOutputGuardrailTripwireTriggered,
+} from "@openai/agents";
 import { describe, expect, test } from "bun:test";
 
 import { AgentContext, ClientToolCall, streamAgentResponse } from "../src/agents";
@@ -292,6 +298,79 @@ function streamFrom(events: unknown[], onReturn?: () => void): AsyncIterable<unk
 function streamedRun(events: unknown[]): { toStream: () => AsyncIterable<unknown> } {
   return { toStream: () => streamFrom(events) };
 }
+
+function throwingStream(
+  events: unknown[],
+  error: Error,
+  options: { returnError?: Error } = {},
+): { toStream: () => AsyncIterable<unknown> } {
+  return {
+    toStream: () => ({
+      [Symbol.asyncIterator](): AsyncIterator<unknown> {
+        let index = 0;
+
+        return {
+          async next(): Promise<IteratorResult<unknown>> {
+            if (index < events.length) {
+              return { done: false, value: events[index++] };
+            }
+
+            throw error;
+          },
+          async return(): Promise<IteratorResult<unknown>> {
+            if (options.returnError) {
+              throw options.returnError;
+            }
+
+            return { done: true, value: undefined };
+          },
+        };
+      },
+    }),
+  };
+}
+
+type GuardrailErrorFactory = {
+  name: string;
+  create: () => Error;
+};
+
+const guardrailErrorFactories: GuardrailErrorFactory[] = [
+  {
+    name: "input",
+    create: () =>
+      new InputGuardrailTripwireTriggered("input blocked", {
+        guardrail: { type: "input", name: "input_blocked" },
+        output: { tripwireTriggered: true, outputInfo: null },
+      } as never),
+  },
+  {
+    name: "output",
+    create: () =>
+      new OutputGuardrailTripwireTriggered("output blocked", {
+        guardrail: { type: "output", name: "output_blocked" },
+        agent: {},
+        agentOutput: "blocked",
+        output: { tripwireTriggered: true, outputInfo: null },
+      } as never),
+  },
+  {
+    name: "tool input",
+    create: () =>
+      new ToolInputGuardrailTripwireTriggered("tool input blocked", {
+        guardrail: { type: "tool_input", name: "tool_input_blocked" },
+        output: { behavior: { type: "throwException" }, outputInfo: null },
+      } as never),
+  },
+  {
+    name: "tool output",
+    create: () =>
+      new ToolOutputGuardrailTripwireTriggered("tool output blocked", {
+        guardrail: { type: "tool_output", name: "tool_output_blocked" },
+        output: { behavior: { type: "throwException" }, outputInfo: null },
+      } as never),
+  },
+];
 
 function rawResponse(data: Record<string, unknown>): unknown {
   return { type: "raw_response_event", data };
@@ -1700,6 +1779,467 @@ describe("streamAgentResponse", () => {
 
     await expect(collect(streamAgentResponse(agentContext, streamedRun([])))).resolves.toEqual([
       { type: "progress_update", icon: null, text: "Queued" },
+    ]);
+  });
+
+  for (const guardrail of guardrailErrorFactories) {
+    test(`removes SDK and context produced items before rethrowing ${guardrail.name} guardrail errors`, async () => {
+      const error = guardrail.create();
+      const agentContext = createContext();
+      const contextItem: Extract<ThreadItem, { type: "assistant_message" }> = {
+        id: "ctx_message",
+        thread_id: thread.id,
+        created_at: now,
+        type: "assistant_message",
+        content: [{ type: "output_text", text: "Context output", annotations: [] }],
+      };
+
+      agentContext.stream({ type: "thread.item.done", item: contextItem });
+
+      const iterator = streamAgentResponse(
+        agentContext,
+        throwingStream(
+          [
+            rawResponse({
+              type: "response.output_item.added",
+              item: { type: "message", id: "sdk_message" },
+            }),
+            rawResponse({
+              type: "response.output_text.done",
+              item_id: "sdk_message",
+              content_index: 0,
+              text: "SDK output",
+            }),
+          ],
+          error,
+        ),
+      );
+      const events: ThreadStreamEvent[] = [];
+      let thrown: unknown;
+
+      try {
+        for await (const event of iterator) {
+          events.push(event);
+        }
+      } catch (error) {
+        thrown = error;
+      }
+
+      expect(thrown).toBe(error);
+
+      expect(events).toEqual([
+        {
+          type: "thread.item.done",
+          item: contextItem,
+        },
+        {
+          type: "thread.item.added",
+          item: {
+            id: "sdk_message",
+            thread_id: "thr_1",
+            created_at: now,
+            type: "assistant_message",
+            content: [],
+          },
+        },
+        {
+          type: "thread.item.updated",
+          item_id: "sdk_message",
+          update: {
+            type: "assistant_message.content_part.done",
+            content_index: 0,
+            content: { type: "output_text", text: "SDK output", annotations: [] },
+          },
+        },
+        { type: "thread.item.removed", item_id: "ctx_message" },
+        { type: "thread.item.removed", item_id: "sdk_message" },
+      ]);
+    });
+  }
+
+  test("does not remove SDK tool metadata-only ids on guardrail errors", async () => {
+    const error = guardrailErrorFactories[0]!.create();
+    const agentContext = createContext();
+    const iterator = streamAgentResponse(
+      agentContext,
+      throwingStream(
+        [
+          {
+            type: "run_item_stream_event",
+            item: {
+              type: "tool_call_item",
+              raw_item: {
+                type: "function_call",
+                id: "tool_call_item",
+                call_id: "call_tool",
+                name: "get_selection",
+              },
+            },
+          },
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "reasoning", id: "reasoning_1" },
+          }),
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "image_generation_call", id: "image_call" },
+          }),
+        ],
+        error,
+      ),
+    );
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of iterator) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(error);
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: { type: "reasoning", tasks: [], expanded: false },
+        },
+      },
+      {
+        type: "thread.item.added",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "generated_image",
+          image: null,
+        },
+      },
+      { type: "thread.item.removed", item_id: "workflow_generated" },
+      { type: "thread.item.removed", item_id: "message_generated" },
+    ]);
+  });
+
+  test("does not remove resumed workflows auto-ended before SDK assistant items", async () => {
+    const error = guardrailErrorFactories[0]!.create();
+    const workflow = storedWorkflowItem();
+    const store = new TestStore([workflow]);
+    const agentContext = createContext(store);
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of streamAgentResponse(
+        agentContext,
+        throwingStream(
+          [
+            rawResponse({
+              type: "response.output_item.added",
+              item: { type: "message", id: "sdk_message" },
+            }),
+          ],
+          error,
+        ),
+      )) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(error);
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          ...workflow,
+          workflow: {
+            ...workflow.workflow,
+            summary: { duration: 0 },
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.added",
+        item: {
+          id: "sdk_message",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      { type: "thread.item.removed", item_id: "sdk_message" },
+    ]);
+  });
+
+  test("does not mask guardrail errors when stream cleanup return rejects", async () => {
+    const error = guardrailErrorFactories[0]!.create();
+    const returnError = new Error("cleanup failed");
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of streamAgentResponse(
+        createContext(),
+        throwingStream(
+          [
+            rawResponse({
+              type: "response.output_item.added",
+              item: { type: "message", id: "sdk_message" },
+            }),
+          ],
+          error,
+          { returnError },
+        ),
+      )) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(error);
+    expect(thrown).not.toBe(returnError);
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "sdk_message",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      { type: "thread.item.removed", item_id: "sdk_message" },
+    ]);
+  });
+
+  test("does not yield pending client tool calls after guardrail errors", async () => {
+    async function* runWithLateGuardrail() {
+      yield rawResponse({
+        type: "response.output_item.added",
+        item: { type: "message", id: "sdk_message" },
+      });
+      throw guardrailErrorFactories[1]!.create();
+    }
+
+    const agentContext = createContext();
+    agentContext.setClientToolCall(new ClientToolCall("get_selection"));
+
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of streamAgentResponse(agentContext, runWithLateGuardrail())) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(OutputGuardrailTripwireTriggered);
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "sdk_message",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      { type: "thread.item.removed", item_id: "sdk_message" },
+    ]);
+  });
+
+  test("does not remove produced items for non-guardrail stream errors", async () => {
+    const error = new Error("ordinary stream failure");
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of streamAgentResponse(
+        createContext(),
+        throwingStream(
+          [
+            rawResponse({
+              type: "response.output_item.added",
+              item: { type: "message", id: "sdk_message" },
+            }),
+          ],
+          error,
+        ),
+      )) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(error);
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "sdk_message",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+    ]);
+  });
+
+  test("does not process queued context events when SDK guardrail rejects immediately", async () => {
+    const error = guardrailErrorFactories[0]!.create();
+    const agentContext = createContext();
+    const contextItem = {
+      ...contextWidgetItem(),
+      id: "widget_before_immediate_guardrail",
+    };
+
+    agentContext.stream({ type: "thread.item.done", item: contextItem });
+
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of streamAgentResponse(
+        agentContext,
+        throwingStream([], error),
+      )) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(error);
+    expect(events).toEqual([]);
+  });
+
+  test("does not process queued context events after guardrail rollback", async () => {
+    const error = guardrailErrorFactories[0]!.create();
+    const agentContext = createContext();
+    const firstContextItem = {
+      ...contextWidgetItem(),
+      id: "widget_before_guardrail",
+    };
+    const secondContextItem = {
+      ...contextWidgetItem(),
+      id: "widget_after_guardrail",
+    };
+
+    agentContext.stream({ type: "thread.item.done", item: firstContextItem });
+
+    async function* runWithQueuedContext() {
+      yield rawResponse({
+        type: "response.output_item.added",
+        item: { type: "message", id: "sdk_message" },
+      });
+      agentContext.stream({ type: "thread.item.done", item: secondContextItem });
+      throw error;
+    }
+
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of streamAgentResponse(agentContext, runWithQueuedContext())) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(error);
+
+    expect(events).toEqual([
+      { type: "thread.item.done", item: firstContextItem },
+      {
+        type: "thread.item.added",
+        item: {
+          id: "sdk_message",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      { type: "thread.item.removed", item_id: "widget_before_guardrail" },
+      { type: "thread.item.removed", item_id: "sdk_message" },
+    ]);
+  });
+
+  test("does not remove context replaced items before rethrowing guardrail errors", async () => {
+    const error = guardrailErrorFactories[0]!.create();
+    const agentContext = createContext();
+    const replacementItem: Extract<ThreadItem, { type: "assistant_message" }> = {
+      id: "ctx_replacement",
+      thread_id: thread.id,
+      created_at: now,
+      type: "assistant_message",
+      content: [{ type: "output_text", text: "Replacement output", annotations: [] }],
+    };
+
+    agentContext.stream({ type: "thread.item.replaced", item: replacementItem });
+
+    const events: ThreadStreamEvent[] = [];
+    let thrown: unknown;
+
+    try {
+      for await (const event of streamAgentResponse(
+        agentContext,
+        throwingStream(
+          [
+            rawResponse({
+              type: "response.output_item.added",
+              item: { type: "message", id: "sdk_message" },
+            }),
+          ],
+          error,
+        ),
+      )) {
+        events.push(event);
+      }
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBe(error);
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.replaced",
+        item: replacementItem,
+      },
+      {
+        type: "thread.item.added",
+        item: {
+          id: "sdk_message",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      { type: "thread.item.removed", item_id: "sdk_message" },
     ]);
   });
 

@@ -1,3 +1,9 @@
+import {
+  InputGuardrailTripwireTriggered,
+  OutputGuardrailTripwireTriggered,
+  ToolInputGuardrailTripwireTriggered,
+  ToolOutputGuardrailTripwireTriggered,
+} from "@openai/agents";
 import type { AssistantMessageContent, ThreadItem } from "../types/core";
 import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
 import { convertTextContentPart, defaultResponseStreamConverter } from "./annotations";
@@ -51,6 +57,7 @@ interface TaggedNextResult<T> {
 interface TaggedNext<T> {
   promise: Promise<TaggedNextResult<T>>;
   result: TaggedNextResult<T> | null;
+  error: unknown | null;
 }
 
 interface NamedToolCallMetadata {
@@ -315,16 +322,74 @@ function tagNext<T>(source: StreamSource, promise: PromiseLike<IteratorResult<T>
   const tagged: TaggedNext<T> = {
     promise: Promise.resolve(null as never),
     result: null,
+    error: null,
   };
 
-  tagged.promise = Promise.resolve(promise).then((result) => {
-    const taggedResult = { source, result };
-    tagged.result = taggedResult;
-    return taggedResult;
-  });
+  tagged.promise = Promise.resolve(promise).then(
+    (result) => {
+      const taggedResult = { source, result };
+      tagged.result = taggedResult;
+      return taggedResult;
+    },
+    (error: unknown) => {
+      tagged.error = error;
+      throw error;
+    },
+  );
   tagged.promise.catch(() => undefined);
 
   return tagged;
+}
+
+function isGuardrailTripwire(error: unknown): boolean {
+  return (
+    error instanceof InputGuardrailTripwireTriggered ||
+    error instanceof OutputGuardrailTripwireTriggered ||
+    error instanceof ToolInputGuardrailTripwireTriggered ||
+    error instanceof ToolOutputGuardrailTripwireTriggered
+  );
+}
+
+function trackProducedItemId(
+  producedItemIds: Set<string>,
+  existingItemIds: ReadonlySet<string>,
+  event: ThreadStreamEvent,
+): void {
+  if (event.type === "thread.item.added") {
+    producedItemIds.add(event.item.id);
+    return;
+  }
+
+  if (
+    event.type === "thread.item.done" &&
+    (!existingItemIds.has(event.item.id) || producedItemIds.has(event.item.id))
+  ) {
+    producedItemIds.add(event.item.id);
+  }
+}
+
+function parseAndTrackProducedItem(
+  producedItemIds: Set<string>,
+  existingItemIds: ReadonlySet<string>,
+  event: ThreadStreamEvent,
+): ThreadStreamEvent {
+  const parsedEvent = ThreadStreamEventSchema.parse(event);
+  trackProducedItemId(producedItemIds, existingItemIds, parsedEvent);
+  return parsedEvent;
+}
+
+function rollbackProducedItemEvents(producedItemIds: ReadonlySet<string>): ThreadStreamEvent[] {
+  return [...producedItemIds].map((itemId) =>
+    ThreadStreamEventSchema.parse({ type: "thread.item.removed", item_id: itemId }),
+  );
+}
+
+async function returnIterator<T>(iterator: AsyncIterator<T>): Promise<void> {
+  try {
+    await iterator.return?.();
+  } catch {
+    // Iterator cleanup is best-effort and must not mask the stream error.
+  }
 }
 
 async function convertSdkEvent<TContext>(
@@ -762,6 +827,7 @@ export async function* streamAgentResponse<TContext>(
     context.context,
   );
   resumeWorkflowFromThreadItems(context, recentItems.data);
+  const existingItemIds = new Set(recentItems.data.map((item) => item.id));
 
   const sdkIterator = normalizeStream(streamedRun)[Symbol.asyncIterator]();
   const contextIterator = context.events()[Symbol.asyncIterator]();
@@ -773,6 +839,7 @@ export async function* streamAgentResponse<TContext>(
     streamingThought: null,
   };
   const toolCallMetadataByName = new Map<string, ToolCallMetadata>();
+  const producedItemIds = new Set<string>();
   let sdkDone = false;
   let contextDone = false;
   let sdkNext = tagNext("sdk", sdkIterator.next());
@@ -782,6 +849,10 @@ export async function* streamAgentResponse<TContext>(
     while (!sdkDone || !contextDone) {
       await Promise.resolve();
 
+      if (!sdkDone && isGuardrailTripwire(sdkNext.error)) {
+        throw sdkNext.error;
+      }
+
       if (!contextDone && contextNext.result) {
         if (contextNext.result.result.done) {
           contextDone = true;
@@ -789,7 +860,7 @@ export async function* streamAgentResponse<TContext>(
           const value = contextNext.result.result.value;
           contextNext = tagNext("context", contextIterator.next());
           for (const event of contextEventsWithWorkflowLifecycle(context, value)) {
-            yield ThreadStreamEventSchema.parse(event);
+            yield parseAndTrackProducedItem(producedItemIds, existingItemIds, event);
           }
         }
         continue;
@@ -821,7 +892,7 @@ export async function* streamAgentResponse<TContext>(
             const value = contextNext.result.result.value;
             contextNext = tagNext("context", contextIterator.next());
             for (const event of contextEventsWithWorkflowLifecycle(context, value)) {
-              yield ThreadStreamEventSchema.parse(event);
+              yield parseAndTrackProducedItem(producedItemIds, existingItemIds, event);
             }
             continue;
           }
@@ -836,7 +907,7 @@ export async function* streamAgentResponse<TContext>(
           const value = next.result.value as ThreadStreamEvent;
 
           for (const event of contextEventsWithWorkflowLifecycle(context, value)) {
-            yield ThreadStreamEventSchema.parse(event);
+            yield parseAndTrackProducedItem(producedItemIds, existingItemIds, event);
           }
         }
         continue;
@@ -856,7 +927,7 @@ export async function* streamAgentResponse<TContext>(
       }
 
       for (const event of await convertSdkEvent(context, state, next.result.value, converter)) {
-        yield ThreadStreamEventSchema.parse(event);
+        yield parseAndTrackProducedItem(producedItemIds, existingItemIds, event);
       }
     }
 
@@ -864,11 +935,21 @@ export async function* streamAgentResponse<TContext>(
     const clientToolCallEvent = pendingClientToolCallEvent(context, toolCallMetadataByName);
 
     if (clientToolCallEvent) {
-      yield ThreadStreamEventSchema.parse(clientToolCallEvent);
+      yield parseAndTrackProducedItem(producedItemIds, existingItemIds, clientToolCallEvent);
     }
+  } catch (error) {
+    if (!isGuardrailTripwire(error)) {
+      throw error;
+    }
+
+    for (const event of rollbackProducedItemEvents(producedItemIds)) {
+      yield event;
+    }
+
+    throw error;
   } finally {
     context.closeEvents();
-    await sdkIterator.return?.();
-    await contextIterator.return?.();
+    await returnIterator(sdkIterator);
+    await returnIterator(contextIterator);
   }
 }

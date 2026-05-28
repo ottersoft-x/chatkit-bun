@@ -4,7 +4,7 @@
 
 **Goal:** Remove ChatKit items produced by the current Agents turn when a JavaScript Agents SDK guardrail tripwire interrupts `streamAgentResponse(...)`.
 
-**Architecture:** Keep rollback private to `src/agents/stream.ts`. Track produced item ids in insertion order while yielding item-bearing stream events and known SDK tool-call metadata; on JS Agents guardrail tripwire, yield `thread.item.removed` events for those ids and rethrow the original error. Preserve current behavior for non-guardrail failures and existing server persistence.
+**Architecture:** Keep rollback private to `src/agents/stream.ts`. Track produced item ids in insertion order while yielding current-turn item-bearing stream events; on JS Agents guardrail tripwire, yield `thread.item.removed` events for those ids and rethrow the original error. Exclude metadata-only SDK tool ids and known existing stored ids from rollback. Preserve current behavior for non-guardrail failures and existing server persistence.
 
 **Tech Stack:** Bun, TypeScript, `bun:test`, `@openai/agents` guardrail tripwire classes, existing ChatKit thread stream events.
 
@@ -239,18 +239,31 @@ function isGuardrailTripwire(error: unknown): boolean {
   );
 }
 
-function trackProducedItemId(producedItemIds: Set<string>, event: ThreadStreamEvent): void {
-  if (event.type === "thread.item.added" || event.type === "thread.item.done") {
+function trackProducedItemId(
+  producedItemIds: Set<string>,
+  existingItemIds: ReadonlySet<string>,
+  event: ThreadStreamEvent,
+): void {
+  if (event.type === "thread.item.added") {
+    producedItemIds.add(event.item.id);
+    return;
+  }
+
+  if (
+    event.type === "thread.item.done" &&
+    (!existingItemIds.has(event.item.id) || producedItemIds.has(event.item.id))
+  ) {
     producedItemIds.add(event.item.id);
   }
 }
 
 function parseAndTrackProducedItem(
   producedItemIds: Set<string>,
+  existingItemIds: ReadonlySet<string>,
   event: ThreadStreamEvent,
 ): ThreadStreamEvent {
   const parsedEvent = ThreadStreamEventSchema.parse(event);
-  trackProducedItemId(producedItemIds, parsedEvent);
+  trackProducedItemId(producedItemIds, existingItemIds, parsedEvent);
   return parsedEvent;
 }
 
@@ -259,11 +272,21 @@ function rollbackProducedItemEvents(producedItemIds: ReadonlySet<string>): Threa
     ThreadStreamEventSchema.parse({ type: "thread.item.removed", item_id: itemId }),
   );
 }
+
+async function returnIterator<T>(iterator: AsyncIterator<T>): Promise<void> {
+  try {
+    await iterator.return?.();
+  } catch {
+    // Iterator cleanup is best-effort and must not mask the stream error.
+  }
+}
 ```
 
-In `streamAgentResponse(...)`, add the produced set after `toolCallMetadataByName`:
+In `streamAgentResponse(...)`, add a known existing item set from the recent
+resume window and the produced set after `toolCallMetadataByName`:
 
 ```ts
+  const existingItemIds = new Set(recentItems.data.map((item) => item.id));
   const toolCallMetadataByName = new Map<string, ToolCallMetadata>();
   const producedItemIds = new Set<string>();
 ```
@@ -277,7 +300,7 @@ yield ThreadStreamEventSchema.parse(event);
 with:
 
 ```ts
-yield parseAndTrackProducedItem(producedItemIds, event);
+yield parseAndTrackProducedItem(producedItemIds, existingItemIds, event);
 ```
 
 There are four direct loop yield sites to update:
@@ -302,8 +325,8 @@ Wrap the existing `try` body with a guardrail catch before the existing `finally
     throw error;
   } finally {
     context.closeEvents();
-    await sdkIterator.return?.();
-    await contextIterator.return?.();
+    await returnIterator(sdkIterator);
+    await returnIterator(contextIterator);
   }
 ```
 
@@ -318,7 +341,7 @@ bun run typecheck
 
 Expected: PASS for the new guardrail rollback tests and existing Agents tests.
 
-## Task 2: SDK Tool Metadata, Generated Images, And Workflow Produced Ids
+## Task 2: SDK Tool Metadata Preservation, Generated Images, And Workflow Produced Ids
 
 **Files:**
 - Modify: `tests/agents.test.ts`
@@ -329,7 +352,7 @@ Expected: PASS for the new guardrail rollback tests and existing Agents tests.
 Add this test inside `describe("streamAgentResponse", () => { ... })`:
 
 ```ts
-  test("removes SDK tool metadata, generated images, and reasoning workflows on guardrail errors", async () => {
+  test("does not remove SDK tool metadata-only ids on guardrail errors", async () => {
     const error = guardrailErrorFactories[0]!.create();
     const agentContext = createContext();
     const iterator = streamAgentResponse(
@@ -395,7 +418,6 @@ Add this test inside `describe("streamAgentResponse", () => { ... })`:
           image: null,
         },
       },
-      { type: "thread.item.removed", item_id: "tool_call_item" },
       { type: "thread.item.removed", item_id: "workflow_generated" },
       { type: "thread.item.removed", item_id: "message_generated" },
     ]);
@@ -459,20 +481,18 @@ Run:
 bun test tests/agents.test.ts
 ```
 
-Expected: FAIL because SDK tool metadata ids are not tracked yet. The generated
-image and reasoning workflow removals may already pass after Task 1 event
-tracking; keep the test because it protects the full produced-id set.
+Expected: PASS after Task 1 event tracking because metadata-only SDK tool ids are
+not ChatKit items yielded by the bridge. The generated image and reasoning
+workflow removals are kept because they protect the yielded produced-id set.
 
-- [ ] **Step 3: Track SDK tool-call metadata ids**
+- [ ] **Step 3: Preserve SDK tool-call metadata without rollback tracking**
 
-In `src/agents/stream.ts`, extend the metadata branch:
+In `src/agents/stream.ts`, keep metadata for normal pending client tool call
+finalization, but do not add metadata-only ids to `producedItemIds`:
 
 ```ts
       if (metadata) {
         toolCallMetadataByName.set(metadata.name, metadata.metadata);
-        if (metadata.metadata.itemId) {
-          producedItemIds.add(metadata.metadata.itemId);
-        }
       }
 ```
 
@@ -480,7 +500,7 @@ Keep pending client tool call event tracking through `parseAndTrackProducedItem(
 
 ```ts
     if (clientToolCallEvent) {
-      yield parseAndTrackProducedItem(producedItemIds, clientToolCallEvent);
+      yield parseAndTrackProducedItem(producedItemIds, existingItemIds, clientToolCallEvent);
     }
 ```
 
@@ -635,10 +655,11 @@ function isGuardrailTripwire(error: unknown): boolean {
 ```ts
 function parseAndTrackProducedItem(
   producedItemIds: Set<string>,
+  existingItemIds: ReadonlySet<string>,
   event: ThreadStreamEvent,
 ): ThreadStreamEvent {
   const parsedEvent = ThreadStreamEventSchema.parse(event);
-  trackProducedItemId(producedItemIds, parsedEvent);
+  trackProducedItemId(producedItemIds, existingItemIds, parsedEvent);
   return parsedEvent;
 }
 ```
@@ -656,8 +677,8 @@ function parseAndTrackProducedItem(
     throw error;
   } finally {
     context.closeEvents();
-    await sdkIterator.return?.();
-    await contextIterator.return?.();
+    await returnIterator(sdkIterator);
+    await returnIterator(contextIterator);
   }
 ```
 
@@ -701,8 +722,15 @@ Expected:
 - Keep rollback logic private to `src/agents/stream.ts`.
 - Preserve `ThreadStreamEventSchema.parse(...)` validation on every yielded event.
 - Use `Set<string>` insertion order for deterministic rollback.
+- Track `thread.item.done` ids only when they are not known existing stored ids
+  from the recent resume window, or when they were already produced earlier in
+  the same turn.
+- Keep SDK tool metadata for normal pending client tool finalization, but do not
+  rollback metadata-only ids.
 - Rethrow the original guardrail error object so callers can distinguish safety
   blocks from generic stream failures.
+- Treat iterator `return(...)` cleanup as best-effort so cleanup failures do not
+  mask the original stream error.
 - Keep non-guardrail errors untouched.
 - Do not change `ChatKitServer.processEvents(...)`; existing
   `thread.item.removed` persistence already deletes stored items and suppresses
