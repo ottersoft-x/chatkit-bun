@@ -715,9 +715,9 @@ export abstract class ChatKitServer<TContext = unknown> {
 
       content.push({
         ...donePart,
-        text: pendingPart.text.length > 0 ? pendingPart.text : donePart.text,
+        text: donePart.text.length > 0 ? donePart.text : pendingPart.text,
         annotations:
-          donePart.annotations.length > pendingPart.annotations.length
+          donePart.annotations.length > 0
             ? donePart.annotations
             : pendingPart.annotations,
       });

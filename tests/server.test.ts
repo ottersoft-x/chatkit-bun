@@ -1965,6 +1965,93 @@ describe("ChatKitServer", () => {
     });
   });
 
+  test("prefers final assistant text and annotations over stale pending content", async () => {
+    const server = new TestServer(async function* (thread) {
+      const assistant = { ...makeAssistantMessage(""), id: "msg_final_authoritative", thread_id: thread.id };
+      yield { type: "thread.item.added", item: assistant };
+      yield {
+        type: "thread.item.updated",
+        item_id: assistant.id,
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "Draft text",
+        },
+      };
+      yield {
+        type: "thread.item.updated",
+        item_id: assistant.id,
+        update: {
+          type: "assistant_message.content_part.annotation_added",
+          content_index: 0,
+          annotation_index: 0,
+          annotation: {
+            type: "annotation",
+            source: { type: "url", url: "https://stale.example.com", title: "Stale" },
+            index: 5,
+          },
+        },
+      };
+      yield {
+        type: "thread.item.done",
+        item: {
+          ...assistant,
+          content: [
+            {
+              type: "output_text",
+              text: "Final text",
+              annotations: [
+                {
+                  type: "annotation",
+                  source: { type: "url", url: "https://final.example.com", title: "Final" },
+                  index: 10,
+                },
+              ],
+            },
+          ],
+        },
+      };
+    });
+    const thread = makeThread();
+    await server.store.saveThread(thread, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Use final content" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    await decodeStream(result);
+    await expect(
+      server.store.loadItem(thread.id, "msg_final_authoritative", defaultContext),
+    ).resolves.toMatchObject({
+      type: "assistant_message",
+      content: [
+        {
+          type: "output_text",
+          text: "Final text",
+          annotations: [
+            {
+              type: "annotation",
+              source: { type: "url", url: "https://final.example.com", title: "Final" },
+              index: 10,
+            },
+          ],
+        },
+      ],
+    });
+  });
+
   test("removes an item from the store from a thread item removed event", async () => {
     const server = new TestServer(async function* () {
       yield { type: "thread.item.removed", item_id: "msg_remove" };
