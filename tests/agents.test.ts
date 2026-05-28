@@ -1570,6 +1570,166 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("maps partial image progress updates", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "image_generation_call", id: "img_call_1" },
+          }),
+          rawResponse({
+            type: "response.image_generation_call.partial_image",
+            item_id: "img_call_1",
+            partial_image_b64: "cGFydGlhbA==",
+            partial_image_index: 1,
+          }),
+          rawResponse({
+            type: "response.output_item.done",
+            item: { type: "image_generation_call", id: "img_call_1", result: "ZmluYWw=" },
+          }),
+        ]),
+        { converter: new ResponseStreamConverter({ partialImages: 3 }) },
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "generated_image",
+          image: null,
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "message_generated",
+        update: {
+          type: "generated_image.updated",
+          image: {
+            id: "img_call_1",
+            url: "data:image/png;base64,cGFydGlhbA==",
+          },
+          progress: 1 / 3,
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "message_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "generated_image",
+          image: {
+            id: "img_call_1",
+            url: "data:image/png;base64,ZmluYWw=",
+          },
+        },
+      },
+    ]);
+  });
+
+  test("uses custom converters for partial image updates and nested provider events", async () => {
+    class CustomConverter extends ResponseStreamConverter {
+      readonly calls: Array<[string, string, number | null]> = [];
+
+      override base64ImageToUrl(
+        imageId: string,
+        base64Image: string,
+        partialImageIndex: number | null = null,
+      ): string {
+        this.calls.push([imageId, base64Image, partialImageIndex]);
+        const suffix = partialImageIndex === null ? "final" : `partial-${partialImageIndex}`;
+        return `https://example.com/${imageId}/${suffix}.png`;
+      }
+    }
+
+    const converter = new CustomConverter({ partialImages: 4 });
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawModel({
+            type: "model",
+            event: {
+              type: "response.output_item.added",
+              item: { type: "image_generation_call", id: "img_call_1" },
+            },
+          }),
+          rawModel({
+            type: "model",
+            event: {
+              type: "response.image_generation_call.partial_image",
+              item_id: "img_call_1",
+              partial_image_b64: "cGFydGlhbA==",
+              partial_image_index: 2,
+            },
+          }),
+          rawModel({
+            type: "model",
+            event: {
+              type: "response.output_item.done",
+              item: { type: "image_generation_call", id: "img_call_1", result: "ZmluYWw=" },
+            },
+          }),
+        ]),
+        { converter },
+      ),
+    );
+
+    expect(converter.calls).toEqual([
+      ["img_call_1", "cGFydGlhbA==", 2],
+      ["img_call_1", "ZmluYWw=", null],
+    ]);
+    expect(events[1]).toEqual({
+      type: "thread.item.updated",
+      item_id: "message_generated",
+      update: {
+        type: "generated_image.updated",
+        image: {
+          id: "img_call_1",
+          url: "https://example.com/img_call_1/partial-2.png",
+        },
+        progress: 0.5,
+      },
+    });
+    expect(events.at(-1)).toEqual({
+      type: "thread.item.done",
+      item: {
+        id: "message_generated",
+        thread_id: "thr_1",
+        created_at: now,
+        type: "generated_image",
+        image: {
+          id: "img_call_1",
+          url: "https://example.com/img_call_1/final.png",
+        },
+      },
+    });
+  });
+
+  test("ignores partial image updates without an active generated image item", async () => {
+    await expect(
+      collect(
+        streamAgentResponse(
+          createContext(),
+          streamedRun([
+            rawResponse({
+              type: "response.image_generation_call.partial_image",
+              item_id: "img_call_1",
+              partial_image_b64: "cGFydGlhbA==",
+              partial_image_index: 1,
+            }),
+          ]),
+        ),
+      ),
+    ).resolves.toEqual([]);
+  });
+
   test("ignores unknown SDK events in the first slice", async () => {
     const agentContext = createContext();
 

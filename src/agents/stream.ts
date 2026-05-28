@@ -401,6 +401,39 @@ async function convertSdkEvent<TContext>(
       ];
     }
 
+    case "response.image_generation_call.partial_image": {
+      const imageId = stringValue(rawData.item_id);
+      const base64Image = stringValue(rawData.partial_image_b64);
+      const partialImageIndex = numberValue(rawData.partial_image_index);
+      const generatedImage = state.generatedImage;
+
+      if (!generatedImage || !imageId || !base64Image || partialImageIndex === null) {
+        return [];
+      }
+
+      if (generatedImage.callId !== null && imageId !== generatedImage.callId) {
+        return [];
+      }
+
+      const image = {
+        id: imageId,
+        url: await converter.base64ImageToUrl(imageId, base64Image, partialImageIndex),
+      };
+      state.generatedImage = { ...generatedImage, item: { ...generatedImage.item, image } };
+
+      return [
+        {
+          type: "thread.item.updated",
+          item_id: generatedImage.item.id,
+          update: {
+            type: "generated_image.updated",
+            image,
+            progress: converter.partialImageIndexToProgress(partialImageIndex),
+          },
+        },
+      ];
+    }
+
     case "response.output_text.annotation.added": {
       const itemId = stringValue(rawData.item_id) ?? state.activeItemId;
       if (!itemId) {
