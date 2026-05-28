@@ -1,6 +1,6 @@
 import { DynamicWidgetRootSchema, type WidgetJson, type WidgetRoot } from "./types";
 
-export function omitUndefinedDeep(value: unknown): WidgetJson {
+function omitUndefinedDeep(value: unknown): WidgetJson {
   if (Array.isArray(value)) {
     return value
       .filter((item) => item !== undefined)

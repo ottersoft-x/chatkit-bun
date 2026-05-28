@@ -34,7 +34,12 @@ function isObjectRecord(value: unknown): value is WidgetNode {
 }
 
 function canValidateStreamingTextUpdate(before: WidgetNode, after: WidgetNode): boolean {
-  return isStreamingText(before) && isStreamingText(after) && typeof after.id === "string";
+  return (
+    isStreamingText(before) &&
+    isStreamingText(after) &&
+    typeof after.id === "string" &&
+    (before.id === after.id || before.id === undefined)
+  );
 }
 
 function valueRequiresFullReplace(before: unknown, after: unknown, isWidgetNode: boolean): boolean {

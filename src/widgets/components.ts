@@ -119,10 +119,10 @@ export function Image(props: ImageProps): DynamicWidgetComponent {
 }
 
 export type ButtonProps = WidgetProps & {
-  label: string;
+  label?: string;
   onClickAction?: ActionConfigInput;
 };
-export function Button(props: ButtonProps): DynamicWidgetComponent {
+export function Button(props: ButtonProps = {}): DynamicWidgetComponent {
   return component("Button", props);
 }
 
@@ -155,7 +155,7 @@ export function Label(props: LabelProps): DynamicWidgetComponent {
   return component("Label", props);
 }
 
-export type RadioGroupProps = WidgetProps & { name: string; options: WidgetJson[] };
+export type RadioGroupProps = WidgetProps & { name: string; options?: WidgetJson[] };
 export function RadioGroup(props: RadioGroupProps): DynamicWidgetComponent {
   return component("RadioGroup", props);
 }

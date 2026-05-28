@@ -98,6 +98,18 @@ describe("widgets", () => {
     });
   });
 
+  test("serializes static widgets with optional Python props omitted", () => {
+    expect(serializeWidget(Card({ children: [Button({})] }))).toEqual({
+      type: "Card",
+      children: [{ type: "Button" }],
+    });
+
+    expect(serializeWidget(Card({ children: [RadioGroup({ name: "radio" })] }))).toEqual({
+      type: "Card",
+      children: [{ type: "RadioGroup", name: "radio" }],
+    });
+  });
+
   test("keeps catalogue component names when props include type", () => {
     const widget = Card({
       type: "Basic",
@@ -251,6 +263,23 @@ describe("widgets", () => {
         component_id: "text",
         delta: ", world!",
         done: false,
+      },
+    ]);
+  });
+
+  test("diffWidget replaces the root for stable-position streaming Text id changes", () => {
+    expect(
+      diffWidget(
+        Card({ children: [Text({ id: "a", value: "A", streaming: true })] }),
+        Card({ children: [Text({ id: "b", value: "AB", streaming: true })] }),
+      ),
+    ).toEqual([
+      {
+        type: "widget.root.updated",
+        widget: {
+          type: "Card",
+          children: [{ type: "Text", id: "b", value: "AB", streaming: true }],
+        },
       },
     ]);
   });
