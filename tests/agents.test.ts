@@ -114,6 +114,28 @@ async function collect(iterable: AsyncIterable<ThreadStreamEvent>): Promise<Thre
   return events;
 }
 
+function assertClientToolCallArgumentTypes(): void {
+  new ClientToolCall("valid", {
+    includeHtml: true,
+    nested: { ids: ["selection"], count: 1, empty: null },
+  });
+
+  // @ts-expect-error client tool arguments must be JSON-compatible.
+  new ClientToolCall("invalid", { callback: () => undefined });
+
+  // @ts-expect-error client tool arguments must be JSON-compatible.
+  new ClientToolCall("invalid", { value: 1n });
+
+  // @ts-expect-error client tool arguments must be JSON-compatible.
+  new ClientToolCall("invalid", { value: new Date() });
+
+  // @ts-expect-error client tool arguments must be JSON-compatible.
+  new ClientToolCall("invalid", { value: Symbol("selection") });
+
+  // @ts-expect-error nested client tool arguments must be JSON-compatible.
+  new ClientToolCall("invalid", { nested: { callback: () => undefined } });
+}
+
 describe("AgentContext", () => {
   test("stores thread, store, request context, and deterministic timestamps", () => {
     const agentContext = createContext();

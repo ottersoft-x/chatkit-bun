@@ -1,4 +1,5 @@
 import type { Store } from "../store";
+import type { JsonValue } from "../serialization";
 import type { ThreadMetadata } from "../types/core";
 
 export interface AgentContextOptions<TContext> {
@@ -18,4 +19,6 @@ export interface ToolCallMetadata {
   callId: string | null;
 }
 
-export type JsonObject = Record<string, unknown>;
+export type { JsonValue } from "../serialization";
+
+export type JsonObject = { [key: string]: JsonValue };
