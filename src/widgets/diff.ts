@@ -43,23 +43,23 @@ function canStreamValueChange(before: WidgetNode, after: WidgetNode): boolean {
   );
 }
 
-function valueRequiresFullReplace(before: unknown, after: unknown): boolean {
+function valueRequiresFullReplace(before: unknown, after: unknown, isWidgetNode: boolean): boolean {
   if (Array.isArray(before) && Array.isArray(after)) {
     if (before.length !== after.length) return true;
     for (let index = 0; index < before.length; index += 1) {
-      if (valueRequiresFullReplace(before[index], after[index])) return true;
+      if (valueRequiresFullReplace(before[index], after[index], isWidgetNode)) return true;
     }
     return false;
   }
 
   if (isObjectRecord(before) && isObjectRecord(after)) {
-    return requiresFullReplace(before, after);
+    return requiresFullReplace(before, after, isWidgetNode);
   }
 
   return !jsonEqual(before, after);
 }
 
-function requiresFullReplace(before: WidgetNode, after: WidgetNode): boolean {
+function requiresFullReplace(before: WidgetNode, after: WidgetNode, isWidgetNode: boolean): boolean {
   if (before.type !== after.type || before.id !== after.id || before.key !== after.key) {
     return true;
   }
@@ -69,10 +69,14 @@ function requiresFullReplace(before: WidgetNode, after: WidgetNode): boolean {
     const beforeValue = before[key];
     const afterValue = after[key];
 
-    if (key === "value" && canStreamValueChange(before, after)) continue;
-    if (key === "streaming" && isStreamingText(before) && isStreamingText(after)) continue;
+    if (isWidgetNode && key === "value" && canStreamValueChange(before, after)) continue;
+    if (isWidgetNode && key === "streaming" && isStreamingText(before) && isStreamingText(after)) {
+      continue;
+    }
 
-    if (valueRequiresFullReplace(beforeValue, afterValue)) return true;
+    if (valueRequiresFullReplace(beforeValue, afterValue, isWidgetNode && key === "children")) {
+      return true;
+    }
   }
 
   return false;
@@ -122,7 +126,7 @@ export function diffWidget(before: WidgetRoot, after: WidgetRoot): WidgetDiffUpd
 
   validateStreamingTextUpdates(beforeNodes, afterNodes);
 
-  if (requiresFullReplace(beforeRoot, afterRoot)) {
+  if (requiresFullReplace(beforeRoot, afterRoot, true)) {
     return [{ type: "widget.root.updated", widget: afterRoot }];
   }
 

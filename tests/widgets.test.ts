@@ -305,6 +305,23 @@ describe("widgets", () => {
     ]);
   });
 
+  test("diffWidget does not stream Text-shaped objects inside data props", () => {
+    expect(
+      diffWidget(
+        Card({ children: [Chart({ data: [{ type: "Text", id: "row", value: "A" }] })] }),
+        Card({ children: [Chart({ data: [{ type: "Text", id: "row", value: "AB" }] })] }),
+      ),
+    ).toEqual([
+      {
+        type: "widget.root.updated",
+        widget: {
+          type: "Card",
+          children: [{ type: "Chart", data: [{ type: "Text", id: "row", value: "AB" }] }],
+        },
+      },
+    ]);
+  });
+
   test("diffWidget rejects late streaming node ids", () => {
     expect(() =>
       diffWidget(
