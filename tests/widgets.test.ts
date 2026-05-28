@@ -409,6 +409,65 @@ describe("widgets", () => {
     });
   });
 
+  test("streamWidget reuses the item creation timestamp for async widgets", async () => {
+    async function* widgets() {
+      yield Card({ children: [Text({ value: "Initial" })] });
+      yield Card({ children: [Text({ value: "Final" })] });
+    }
+
+    const timestamps = [
+      "2026-05-27T00:00:04.000Z",
+      "2026-05-27T00:00:05.000Z",
+      "2026-05-27T00:00:06.000Z",
+    ];
+    const events = await collect(
+      streamWidget(testThread, widgets(), {
+        generateId: () => "msg_created_at",
+        now: () => timestamps.shift() ?? "2026-05-27T00:00:07.000Z",
+      }),
+    );
+
+    expect(events[0]).toMatchObject({
+      type: "thread.item.added",
+      item: { created_at: "2026-05-27T00:00:04.000Z" },
+    });
+    expect(events.at(-1)).toMatchObject({
+      type: "thread.item.done",
+      item: { created_at: "2026-05-27T00:00:04.000Z" },
+    });
+  });
+
+  test("streamWidget closes async widget iterators when consumers stop early", async () => {
+    let returnCalled = false;
+    const iterator: AsyncIterator<DynamicWidgetRoot> = {
+      async next() {
+        return {
+          done: false,
+          value: Card({ children: [Text({ value: "Initial" })] }),
+        };
+      },
+      async return() {
+        returnCalled = true;
+        return { done: true, value: undefined };
+      },
+    };
+    const widgets: AsyncIterable<DynamicWidgetRoot> = {
+      [Symbol.asyncIterator]() {
+        return iterator;
+      },
+    };
+
+    for await (const event of streamWidget(testThread, widgets, {
+      generateId: () => "msg_cancelled",
+      now: () => "2026-05-27T00:00:08.000Z",
+    })) {
+      expect(event.type).toBe("thread.item.added");
+      break;
+    }
+
+    expect(returnCalled).toBe(true);
+  });
+
   test("streamWidget rejects empty async widget generators", async () => {
     async function* widgets() {}
 

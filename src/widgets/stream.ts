@@ -25,6 +25,7 @@ function isAsyncIterable(value: unknown): value is AsyncIterable<WidgetRoot> {
 function makeWidgetItem(
   thread: ThreadMetadata,
   itemId: string,
+  createdAt: string,
   widget: WidgetRoot,
   options: ResolvedStreamWidgetOptions,
 ): ThreadItem {
@@ -32,7 +33,7 @@ function makeWidgetItem(
     id: itemId,
     type: "widget",
     thread_id: thread.id,
-    created_at: options.now(),
+    created_at: createdAt,
     widget: serializeWidget(widget),
     copy_text: options.copyText ?? undefined,
   };
@@ -49,43 +50,55 @@ export async function* streamWidget(
     copyText: options.copyText,
   };
   const itemId = resolvedOptions.generateId("message");
+  const createdAt = resolvedOptions.now();
 
   if (!isAsyncIterable(widgetOrAsyncIterable)) {
     yield {
       type: "thread.item.done",
-      item: makeWidgetItem(thread, itemId, widgetOrAsyncIterable, resolvedOptions),
+      item: makeWidgetItem(thread, itemId, createdAt, widgetOrAsyncIterable, resolvedOptions),
     };
     return;
   }
 
   const iterator = widgetOrAsyncIterable[Symbol.asyncIterator]();
-  const first = await iterator.next();
-  if (first.done) {
-    throw new Error("streamWidget async iterable must yield an initial widget.");
-  }
-
-  let lastState = first.value;
-  yield {
-    type: "thread.item.added",
-    item: makeWidgetItem(thread, itemId, lastState, resolvedOptions),
-  };
-
-  for (;;) {
-    const next = await iterator.next();
-    if (next.done) break;
-
-    for (const update of diffWidget(lastState, next.value)) {
-      yield {
-        type: "thread.item.updated",
-        item_id: itemId,
-        update,
-      };
+  let completed = false;
+  try {
+    const first = await iterator.next();
+    if (first.done) {
+      completed = true;
+      throw new Error("streamWidget async iterable must yield an initial widget.");
     }
-    lastState = next.value;
-  }
 
-  yield {
-    type: "thread.item.done",
-    item: makeWidgetItem(thread, itemId, lastState, resolvedOptions),
-  };
+    let lastState = first.value;
+    yield {
+      type: "thread.item.added",
+      item: makeWidgetItem(thread, itemId, createdAt, lastState, resolvedOptions),
+    };
+
+    for (;;) {
+      const next = await iterator.next();
+      if (next.done) {
+        completed = true;
+        break;
+      }
+
+      for (const update of diffWidget(lastState, next.value)) {
+        yield {
+          type: "thread.item.updated",
+          item_id: itemId,
+          update,
+        };
+      }
+      lastState = next.value;
+    }
+
+    yield {
+      type: "thread.item.done",
+      item: makeWidgetItem(thread, itemId, createdAt, lastState, resolvedOptions),
+    };
+  } finally {
+    if (!completed) {
+      await iterator.return?.();
+    }
+  }
 }
