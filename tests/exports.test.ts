@@ -9,6 +9,7 @@ import {
   ChatKitServer,
   ClientToolCall,
   NonStreamingResult,
+  ResponseStreamConverter,
   SQLiteStore,
   StreamingResult,
   ThreadMetadataSchema,
@@ -16,6 +17,7 @@ import {
   createActionConfig,
   createChatKitHandler,
   decodeJsonBytes,
+  defaultResponseStreamConverter,
   diffWidget,
   encodeJsonBytes,
   defaultGenerateId,
@@ -46,5 +48,7 @@ describe("public exports", () => {
     expect(typeof AgentContext).toBe("function");
     expect(typeof ClientToolCall).toBe("function");
     expect(typeof streamAgentResponse).toBe("function");
+    expect(typeof ResponseStreamConverter).toBe("function");
+    expect(defaultResponseStreamConverter).toBeInstanceOf(ResponseStreamConverter);
   });
 });
