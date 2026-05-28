@@ -8,10 +8,18 @@ import type { AgentStreamInput, StreamAgentResponseOptions, ToolCallMetadata } f
 type UnknownRecord = Record<string, unknown>;
 
 type GeneratedImageItem = Extract<ThreadItem, { type: "generated_image" }>;
+type WorkflowItem = Extract<ThreadItem, { type: "workflow" }>;
+type ThoughtTask = Extract<WorkflowItem["workflow"]["tasks"][number], { type: "thought" }>;
 
 interface GeneratedImageState {
   callId: string | null;
   item: GeneratedImageItem;
+}
+
+interface StreamingThoughtState {
+  itemId: string | null;
+  summaryIndex: number;
+  task: ThoughtTask;
 }
 
 interface AssistantTextState {
@@ -19,6 +27,7 @@ interface AssistantTextState {
   textByPart: Map<string, string>;
   annotationCountByPart: Map<string, number>;
   generatedImage: GeneratedImageState | null;
+  streamingThought: StreamingThoughtState | null;
 }
 
 type StreamSource = "sdk" | "context";
@@ -159,6 +168,46 @@ function generatedImageItem<TContext>(
     type: "generated_image",
     image,
   };
+}
+
+function workflowItem<TContext>(context: AgentContext<TContext>, itemId: string): WorkflowItem {
+  return {
+    id: itemId,
+    thread_id: context.thread.id,
+    created_at: context.createdAt(),
+    type: "workflow",
+    workflow: {
+      type: "reasoning",
+      tasks: [],
+      expanded: false,
+    },
+  };
+}
+
+function thoughtTask(content: string): ThoughtTask {
+  return {
+    type: "thought",
+    content,
+    status_indicator: "none",
+  };
+}
+
+function matchingStreamingThought(
+  state: AssistantTextState,
+  itemId: string | null,
+  summaryIndex: number,
+): StreamingThoughtState | null {
+  const streamingThought = state.streamingThought;
+
+  if (
+    streamingThought &&
+    streamingThought.itemId === itemId &&
+    streamingThought.summaryIndex === summaryIndex
+  ) {
+    return streamingThought;
+  }
+
+  return null;
 }
 
 function assistantContentFromItem(
@@ -346,6 +395,23 @@ async function convertSdkEvent<TContext>(
         return [];
       }
 
+      if (item.type === "reasoning") {
+        if (context.workflowItem) {
+          return [];
+        }
+
+        const itemId = context.store.generateItemId("workflow", context.thread, context.context);
+        const workflow = workflowItem(context, itemId);
+        context.workflowItem = workflow;
+
+        return [
+          {
+            type: "thread.item.added",
+            item: workflow,
+          },
+        ];
+      }
+
       if (item.type === "image_generation_call") {
         const callId = stringValue(item.id);
         const itemId = context.store.generateItemId("message", context.thread, context.context);
@@ -396,6 +462,110 @@ async function convertSdkEvent<TContext>(
             type: "assistant_message.content_part.text_delta",
             content_index: contentIndex,
             delta,
+          },
+        },
+      ];
+    }
+
+    case "response.reasoning_summary_text.delta": {
+      const workflow = context.workflowItem;
+      const itemId = stringValue(rawData.item_id);
+      const summaryIndex = numberValue(rawData.summary_index);
+      const delta = stringValue(rawData.delta) ?? "";
+
+      if (!workflow || summaryIndex === null) {
+        return [];
+      }
+
+      if (workflow.workflow.type === "reasoning" && workflow.workflow.tasks.length === 0) {
+        const task = thoughtTask(delta);
+        state.streamingThought = { itemId, summaryIndex, task };
+        workflow.workflow.tasks.push(task);
+
+        return [
+          {
+            type: "thread.item.updated",
+            item_id: workflow.id,
+            update: {
+              type: "workflow.task.added",
+              task_index: 0,
+              task,
+            },
+          },
+        ];
+      }
+
+      const streamingThought = matchingStreamingThought(state, itemId, summaryIndex);
+
+      if (!streamingThought) {
+        return [];
+      }
+
+      streamingThought.task.content += delta;
+      const taskIndex = workflow.workflow.tasks.indexOf(streamingThought.task);
+
+      if (taskIndex < 0) {
+        return [];
+      }
+
+      return [
+        {
+          type: "thread.item.updated",
+          item_id: workflow.id,
+          update: {
+            type: "workflow.task.updated",
+            task_index: taskIndex,
+            task: streamingThought.task,
+          },
+        },
+      ];
+    }
+
+    case "response.reasoning_summary_text.done": {
+      const workflow = context.workflowItem;
+      const itemId = stringValue(rawData.item_id);
+      const summaryIndex = numberValue(rawData.summary_index);
+      const text = stringValue(rawData.text) ?? "";
+
+      if (!workflow || summaryIndex === null) {
+        return [];
+      }
+
+      const streamingThought = matchingStreamingThought(state, itemId, summaryIndex);
+
+      if (streamingThought) {
+        streamingThought.task.content = text;
+        state.streamingThought = null;
+        const taskIndex = workflow.workflow.tasks.indexOf(streamingThought.task);
+
+        if (taskIndex < 0) {
+          return [];
+        }
+
+        return [
+          {
+            type: "thread.item.updated",
+            item_id: workflow.id,
+            update: {
+              type: "workflow.task.updated",
+              task_index: taskIndex,
+              task: streamingThought.task,
+            },
+          },
+        ];
+      }
+
+      const task = thoughtTask(text);
+      workflow.workflow.tasks.push(task);
+
+      return [
+        {
+          type: "thread.item.updated",
+          item_id: workflow.id,
+          update: {
+            type: "workflow.task.added",
+            task_index: workflow.workflow.tasks.length - 1,
+            task,
           },
         },
       ];
@@ -596,6 +766,7 @@ export async function* streamAgentResponse<TContext>(
     textByPart: new Map(),
     annotationCountByPart: new Map(),
     generatedImage: null,
+    streamingThought: null,
   };
   const toolCallMetadataByName = new Map<string, ToolCallMetadata>();
   let sdkDone = false;

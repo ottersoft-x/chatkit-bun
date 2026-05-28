@@ -806,6 +806,163 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("maps reasoning summary streams into workflow thought tasks", async () => {
+    const agentContext = createContext();
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "reasoning", id: "resp_1", summary: [] },
+          }),
+          rawResponse({
+            type: "response.reasoning_summary_text.delta",
+            item_id: "resp_1",
+            summary_index: 0,
+            delta: "Think",
+          }),
+          rawResponse({
+            type: "response.reasoning_summary_text.delta",
+            item_id: "resp_1",
+            summary_index: 0,
+            delta: "ing 1",
+          }),
+          rawResponse({
+            type: "response.reasoning_summary_text.done",
+            item_id: "resp_1",
+            summary_index: 0,
+            text: "Thinking 1",
+          }),
+          rawResponse({
+            type: "response.reasoning_summary_text.delta",
+            item_id: "resp_1",
+            summary_index: 1,
+            delta: "Think",
+          }),
+          rawResponse({
+            type: "response.reasoning_summary_text.delta",
+            item_id: "resp_1",
+            summary_index: 1,
+            delta: "ing 2",
+          }),
+          rawResponse({
+            type: "response.reasoning_summary_text.done",
+            item_id: "resp_1",
+            summary_index: 1,
+            text: "Thinking 2",
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "reasoning",
+            tasks: [],
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.added",
+          task_index: 0,
+          task: { type: "thought", content: "Think", status_indicator: "none" },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.updated",
+          task_index: 0,
+          task: { type: "thought", content: "Thinking 1", status_indicator: "none" },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.updated",
+          task_index: 0,
+          task: { type: "thought", content: "Thinking 1", status_indicator: "none" },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.added",
+          task_index: 1,
+          task: { type: "thought", content: "Thinking 2", status_indicator: "none" },
+        },
+      },
+    ]);
+    expect(agentContext.workflowItem?.workflow.tasks).toEqual([
+      { type: "thought", content: "Thinking 1", status_indicator: "none" },
+      { type: "thought", content: "Thinking 2", status_indicator: "none" },
+    ]);
+  });
+
+  test("maps nested provider reasoning events through the raw model path", async () => {
+    const agentContext = createContext();
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawModel({
+            type: "model",
+            event: {
+              type: "response.output_item.added",
+              item: { type: "reasoning", id: "resp_1", summary: [] },
+            },
+          }),
+          rawModel({
+            type: "model",
+            event: {
+              type: "response.reasoning_summary_text.done",
+              item_id: "resp_1",
+              summary_index: 0,
+              text: "Nested thought",
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: { type: "reasoning", tasks: [], expanded: false },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.added",
+          task_index: 0,
+          task: { type: "thought", content: "Nested thought", status_indicator: "none" },
+        },
+      },
+    ]);
+  });
+
   test("yields context events while waiting for SDK events", async () => {
     const agentContext = createContext();
     const gate = deferred();
