@@ -357,6 +357,29 @@ describe("AgentContext", () => {
     );
   });
 
+  test("tracks the active workflow item for stream conversion", () => {
+    const agentContext = createContext();
+    const workflow: Extract<ThreadItem, { type: "workflow" }> = {
+      id: "workflow_generated",
+      thread_id: thread.id,
+      created_at: now,
+      type: "workflow",
+      workflow: {
+        type: "reasoning",
+        tasks: [],
+        expanded: false,
+      },
+    };
+
+    expect(agentContext.workflowItem).toBeNull();
+
+    agentContext.workflowItem = workflow;
+    expect(agentContext.workflowItem).toBe(workflow);
+
+    agentContext.workflowItem = null;
+    expect(agentContext.workflowItem).toBeNull();
+  });
+
   test("queues validated stream events", async () => {
     const agentContext = createContext();
 
