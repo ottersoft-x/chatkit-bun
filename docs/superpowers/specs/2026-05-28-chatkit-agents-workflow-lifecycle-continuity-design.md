@@ -35,8 +35,9 @@ This milestone does not add:
 - Widget helper APIs.
 - Generated-image input conversion or replay.
 - Any schema changes.
-- Server persistence changes beyond using the existing store API from the
-  agents stream bridge.
+- Broad server persistence rewrites. A narrow `thread.item.done` upsert path
+  for already-stored resumed items is in scope if tests prove insert-only
+  persistence would fail.
 
 ## Startup Resume
 
@@ -89,10 +90,11 @@ and deferred-empty custom workflow behavior stay aligned with
 ## End-Of-Run Persist
 
 After the SDK stream and context queue complete normally, if
-`context.workflowItem` is still set, call:
+`context.workflowItem` is still set, upsert the workflow item with a current
+`created_at` value:
 
 ```ts
-await context.store.addThreadItem(context.thread.id, context.workflowItem, context.context);
+await context.store.saveItem(context.thread.id, persistedWorkflow, context.context);
 ```
 
 Then clear `context.workflowItem`.
@@ -100,6 +102,8 @@ Then clear `context.workflowItem`.
 This persistence is silent. It should not yield a `thread.item.done` event and
 should not add a duration summary. The stored workflow remains open so a later
 turn can resume it and append or update workflow tasks against the same item id.
+Refreshing `created_at` during the silent upsert keeps the workflow in SQLite's
+two-item resume window after a pending client tool call is stored.
 
 Do not persist an extra workflow when the workflow has already been ended by
 `AgentContext.endWorkflow(...)`, assistant-message auto-end, or context
@@ -156,6 +160,7 @@ The milestone is complete when:
   two-item rule.
 - A workflow can stay open across response turns by being persisted silently at
   normal stream completion.
+- A resumed workflow can later be finalized without duplicate item id failures.
 - Resumed workflows keep their existing item id and can receive new task add or
   update events.
 - Context-emitted visible items end the active workflow before they are yielded.

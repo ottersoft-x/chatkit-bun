@@ -2355,6 +2355,60 @@ describe("ChatKitServer", () => {
     expect(persisted.workflow.tasks).toHaveLength(1);
   });
 
+  test("updates stored workflow items when a resumed stream emits them as done", async () => {
+    const server = new TestServer(async function* (thread) {
+      const workflow = makeWorkflowItem(thread.id);
+      const doneWorkflow: WorkflowItem = {
+        ...workflow,
+        workflow: {
+          ...workflow.workflow,
+          summary: { title: "Finished", icon: "check" },
+          expanded: false,
+        },
+      };
+
+      yield { type: "thread.item.done", item: doneWorkflow };
+    });
+    const thread = makeThread();
+    const storedWorkflow: WorkflowItem = {
+      ...makeWorkflowItem(thread.id),
+      workflow: {
+        type: "reasoning",
+        summary: { title: "Working", icon: "spinner" },
+        tasks: [],
+        expanded: true,
+      },
+    };
+    await server.store.saveThread(thread, defaultContext);
+    await server.store.addThreadItem(thread.id, storedWorkflow, defaultContext);
+
+    const result = (await server.process(
+      JSON.stringify({
+        type: "threads.add_user_message",
+        params: {
+          thread_id: thread.id,
+          input: {
+            content: [{ type: "input_text", text: "Resume" }],
+            attachments: [],
+            inference_options: {},
+          },
+        },
+        metadata: {},
+      }),
+      defaultContext,
+    )) as StreamingResult;
+
+    const events = await decodeStream(result);
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    await expect(server.store.loadItem(thread.id, "workflow_test", defaultContext)).resolves.toMatchObject({
+      type: "workflow",
+      workflow: {
+        expanded: false,
+        summary: { title: "Finished", icon: "check" },
+      },
+    });
+  });
+
   test("merges pending workflow task updates with final workflow fields on done", async () => {
     const server = new TestServer(async function* (thread) {
       const workflow = makeWorkflowItem(thread.id);

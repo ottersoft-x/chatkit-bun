@@ -15,6 +15,10 @@ export type ThreadItemAddedEvent = Extract<ThreadStreamEvent, { type: "thread.it
 export type ThreadItemDoneEvent = Extract<ThreadStreamEvent, { type: "thread.item.done" }>;
 export type ThreadItemUpdatedEvent = Extract<ThreadStreamEvent, { type: "thread.item.updated" }>;
 
+export function isWorkflowItem(item: ThreadItem | undefined): item is WorkflowItem {
+  return item?.type === "workflow";
+}
+
 export function createWorkflowItem<TContext>(
   context: AgentContext<TContext>,
   workflow: Workflow,
@@ -49,6 +53,38 @@ export function workflowAddedEvent(workflow: WorkflowItem): ThreadItemAddedEvent
     type: "thread.item.added",
     item: workflow,
   };
+}
+
+export function resumeWorkflowFromThreadItems<TContext>(
+  context: AgentContext<TContext>,
+  items: readonly ThreadItem[],
+): void {
+  const latest = items[0];
+  const secondLatest = items[1];
+
+  if (isWorkflowItem(latest)) {
+    context.workflowItem = latest;
+    return;
+  }
+
+  if (latest?.type === "client_tool_call" && isWorkflowItem(secondLatest)) {
+    context.workflowItem = secondLatest;
+  }
+}
+
+export function shouldAutoEndWorkflowForItem<TContext>(
+  context: AgentContext<TContext>,
+  item: ThreadItem,
+): boolean {
+  const workflow = context.workflowItem;
+
+  return (
+    workflow !== null &&
+    item.id !== workflow.id &&
+    item.type !== "client_tool_call" &&
+    item.type !== "hidden_context_item" &&
+    item.type !== "sdk_hidden_context"
+  );
 }
 
 export function createThoughtTask(content: string): ThoughtTask {
@@ -164,4 +200,21 @@ export function finishWorkflow<TContext>(
     type: "thread.item.done",
     item: doneItem,
   };
+}
+
+export async function persistOpenWorkflow<TContext>(
+  context: AgentContext<TContext>,
+): Promise<void> {
+  const workflow = context.workflowItem;
+
+  if (!workflow) {
+    return;
+  }
+
+  await context.store.saveItem(
+    context.thread.id,
+    { ...workflow, created_at: context.createdAt() },
+    context.context,
+  );
+  context.workflowItem = null;
 }

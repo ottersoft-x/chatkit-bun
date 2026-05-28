@@ -567,7 +567,11 @@ export abstract class ChatKitServer<TContext = unknown> {
             pendingItem,
             updatedPendingItemIds.has(event.item.id),
           );
-          await this.store.addThreadItem(thread.id, itemToSave, context);
+          if (pendingItem) {
+            await this.store.addThreadItem(thread.id, itemToSave, context);
+          } else {
+            await this.store.saveItem(thread.id, itemToSave, context);
+          }
           pendingItems.delete(event.item.id);
           updatedPendingItemIds.delete(event.item.id);
           suppressClientEvent = this.isHiddenItem(itemToSave);

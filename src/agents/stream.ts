@@ -9,6 +9,10 @@ import {
   createReasoningWorkflowItem,
   createThoughtTask,
   finishWorkflow,
+  isWorkflowItem,
+  persistOpenWorkflow,
+  resumeWorkflowFromThreadItems,
+  shouldAutoEndWorkflowForItem,
   type ThoughtTask,
   updateWorkflowTaskEvent,
   workflowAddedEvent,
@@ -706,12 +710,59 @@ function pendingClientToolCallEvent<TContext>(
   };
 }
 
+function contextEventsWithWorkflowLifecycle<TContext>(
+  context: AgentContext<TContext>,
+  event: ThreadStreamEvent,
+): ThreadStreamEvent[] {
+  if (event.type !== "thread.item.added" && event.type !== "thread.item.done") {
+    return [event];
+  }
+
+  const events: ThreadStreamEvent[] = [];
+
+  if (shouldAutoEndWorkflowForItem(context, event.item)) {
+    const workflowDone = finishWorkflow(context);
+
+    if (workflowDone) {
+      events.push(workflowDone);
+    }
+  }
+
+  if (
+    event.type === "thread.item.added" &&
+    isWorkflowItem(event.item) &&
+    context.workflowItem?.id !== event.item.id
+  ) {
+    context.workflowItem = event.item;
+  }
+
+  if (
+    event.type === "thread.item.done" &&
+    isWorkflowItem(event.item) &&
+    context.workflowItem?.id === event.item.id
+  ) {
+    context.workflowItem = null;
+  }
+
+  events.push(event);
+  return events;
+}
+
 export async function* streamAgentResponse<TContext>(
   context: AgentContext<TContext>,
   streamedRun: AgentStreamInput | AsyncIterable<unknown>,
   options: StreamAgentResponseOptions = {},
 ): AsyncIterable<ThreadStreamEvent> {
   const converter = options.converter ?? defaultResponseStreamConverter;
+  const recentItems = await context.store.loadThreadItems(
+    context.thread.id,
+    null,
+    2,
+    "desc",
+    context.context,
+  );
+  resumeWorkflowFromThreadItems(context, recentItems.data);
+
   const sdkIterator = normalizeStream(streamedRun)[Symbol.asyncIterator]();
   const contextIterator = context.events()[Symbol.asyncIterator]();
   const state: AssistantTextState = {
@@ -737,7 +788,9 @@ export async function* streamAgentResponse<TContext>(
         } else {
           const value = contextNext.result.result.value;
           contextNext = tagNext("context", contextIterator.next());
-          yield ThreadStreamEventSchema.parse(value);
+          for (const event of contextEventsWithWorkflowLifecycle(context, value)) {
+            yield ThreadStreamEventSchema.parse(event);
+          }
         }
         continue;
       }
@@ -767,7 +820,9 @@ export async function* streamAgentResponse<TContext>(
           } else {
             const value = contextNext.result.result.value;
             contextNext = tagNext("context", contextIterator.next());
-            yield ThreadStreamEventSchema.parse(value);
+            for (const event of contextEventsWithWorkflowLifecycle(context, value)) {
+              yield ThreadStreamEventSchema.parse(event);
+            }
             continue;
           }
         }
@@ -778,7 +833,11 @@ export async function* streamAgentResponse<TContext>(
           contextDone = true;
         } else {
           contextNext = tagNext("context", contextIterator.next());
-          yield ThreadStreamEventSchema.parse(next.result.value);
+          const value = next.result.value as ThreadStreamEvent;
+
+          for (const event of contextEventsWithWorkflowLifecycle(context, value)) {
+            yield ThreadStreamEventSchema.parse(event);
+          }
         }
         continue;
       }
@@ -801,6 +860,7 @@ export async function* streamAgentResponse<TContext>(
       }
     }
 
+    await persistOpenWorkflow(context);
     const clientToolCallEvent = pendingClientToolCallEvent(context, toolCallMetadataByName);
 
     if (clientToolCallEvent) {

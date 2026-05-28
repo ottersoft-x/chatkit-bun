@@ -33,14 +33,20 @@ Commit checkpoints appear in the plan for review-sized boundaries. Only run comm
 - Modify: `src/agents/stream.ts`
   - Load resumable workflow state before stream merge.
   - Process context events through workflow auto-end/tracking logic.
-  - Persist an open workflow before yielding a pending client tool call at normal completion.
+  - Upsert an open workflow with a current `created_at` before yielding a pending client tool call at normal completion.
+- Modify: `src/server.ts`
+  - Upsert `thread.item.done` events for already-stored resumed items while keeping insert-only persistence for items added in the current stream.
+- Modify: `tests/server.test.ts`
+  - Add a SQLite-backed regression for finalizing a resumed workflow item.
 
 ## Task 1: Resume Stored Workflows
 
 **Files:**
 - Modify: `tests/agents.test.ts`
+- Modify: `tests/server.test.ts`
 - Modify: `src/agents/workflows.ts`
 - Modify: `src/agents/stream.ts`
+- Modify: `src/server.ts`
 
 - [ ] **Step 1: Update the Agents test store for thread item history**
 
@@ -49,6 +55,11 @@ In `tests/agents.test.ts`, replace the start of `TestStore` with this shape:
 ```ts
 class TestStore extends BaseStore<RequestContext> {
   readonly addedThreadItems: Array<{
+    threadId: string;
+    item: ThreadItem;
+    context: RequestContext;
+  }> = [];
+  readonly savedThreadItems: Array<{
     threadId: string;
     item: ThreadItem;
     context: RequestContext;
@@ -96,6 +107,14 @@ Replace `addThreadItem(...)` with:
     context: RequestContext,
   ): Promise<void> {
     this.addedThreadItems.push({ threadId, item: structuredClone(item), context });
+  }
+```
+
+Replace `saveItem(...)` with:
+
+```ts
+  override async saveItem(threadId: string, item: ThreadItem, context: RequestContext): Promise<void> {
+    this.savedThreadItems.push({ threadId, item: structuredClone(item), context });
   }
 ```
 
@@ -322,6 +341,38 @@ bun test tests/agents.test.ts
 
 Expected: PASS for the new resume tests and existing Agents tests.
 
+- [ ] **Step 7: Add the resumed workflow finalization regression**
+
+In `tests/server.test.ts`, add a test near the existing workflow persistence
+tests that stores a workflow item, then streams a `thread.item.done` event for
+the same workflow id with a summary and `expanded: false`.
+
+Run the focused test before changing production code.
+
+Expected: FAIL with a stream error caused by duplicate insert persistence.
+
+- [ ] **Step 8: Upsert already-stored done items**
+
+In `src/server.ts`, inside the `thread.item.done` branch of `processEvents(...)`,
+persist with `addThreadItem(...)` when `pendingItem` exists and with
+`saveItem(...)` when it does not.
+
+This preserves insert-only persistence for normal added-then-done stream items
+and allows resumed/stored workflow items to be finalized without duplicate id
+failures.
+
+- [ ] **Step 9: Verify Task 1**
+
+Run:
+
+```bash
+bun test tests/server.test.ts
+bun test tests/agents.test.ts
+bun run typecheck
+```
+
+Expected: PASS.
+
 ## Task 2: Persist Open Workflows At Stream Completion
 
 **Files:**
@@ -363,7 +414,7 @@ Add these tests in `tests/agents.test.ts` after the resume tests:
         },
       },
     ]);
-    expect(store.addedThreadItems).toEqual([
+    expect(store.savedThreadItems).toEqual([
       {
         threadId: "thr_1",
         context: requestContext,
@@ -412,7 +463,7 @@ Add these tests in `tests/agents.test.ts` after the resume tests:
         },
       },
     });
-    expect(store.addedThreadItems).toEqual([]);
+    expect(store.savedThreadItems).toEqual([]);
   });
 
   test("persists open workflows before yielding pending client tool calls", async () => {
@@ -442,7 +493,7 @@ Add these tests in `tests/agents.test.ts` after the resume tests:
         arguments: {},
       },
     });
-    expect(store.addedThreadItems.map((entry) => entry.item.type)).toEqual(["workflow"]);
+    expect(store.savedThreadItems.map((entry) => entry.item.type)).toEqual(["workflow"]);
   });
 ```
 
@@ -470,7 +521,11 @@ export async function persistOpenWorkflow<TContext>(
     return;
   }
 
-  await context.store.addThreadItem(context.thread.id, workflow, context.context);
+  await context.store.saveItem(
+    context.thread.id,
+    { ...workflow, created_at: context.createdAt() },
+    context.context,
+  );
   context.workflowItem = null;
 }
 ```
@@ -498,7 +553,7 @@ with:
     const clientToolCallEvent = pendingClientToolCallEvent(context, toolCallMetadataByName);
 ```
 
-This ordering preserves Python's item order: the open workflow is stored before the pending client tool call is emitted and persisted by the server.
+This ordering preserves Python's two-item resume window: the open workflow is upserted with a current timestamp before the pending client tool call is emitted and persisted by the server.
 
 - [ ] **Step 5: Run focused tests**
 
@@ -613,7 +668,7 @@ Add these tests after the silent-persist tests:
       },
       { type: "thread.item.added", item: widget },
     ]);
-    expect(store.addedThreadItems).toEqual([]);
+    expect(store.savedThreadItems).toEqual([]);
   });
 
   test("ends active workflows before context-emitted generated image items", async () => {
@@ -661,7 +716,7 @@ Add these tests after the silent-persist tests:
       { type: "thread.item.added", item: hiddenContextItem() },
       { type: "thread.item.added", item: sdkHiddenContextItem() },
     ]);
-    expect(store.addedThreadItems.at(0)?.item.id).toBe("wf_previous");
+    expect(store.savedThreadItems.at(0)?.item.id).toBe("wf_previous");
   });
 ```
 
@@ -797,7 +852,7 @@ Expected:
 - Use Bun tooling only.
 - Keep `AgentContext.workflowItem` as the only active workflow state.
 - Resume from stored items before creating SDK/context iterators that depend on active workflow state.
-- Persist an open workflow before yielding the pending client tool call event.
+- Persist an open workflow with upsert semantics and a current `created_at` before yielding the pending client tool call event.
 - Do not emit `thread.item.done` for silent end-of-run persistence.
 - Keep reasoning workflow event shapes identical.
-- Do not add server changes unless a test proves the existing store API is insufficient.
+- Keep server changes limited to the tested upsert path for already-stored resumed items.
