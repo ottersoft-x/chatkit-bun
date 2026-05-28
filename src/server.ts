@@ -674,7 +674,7 @@ export abstract class ChatKitServer<TContext = unknown> {
     }
 
     if (doneItem.type === "assistant_message" && pendingItem.type === "assistant_message") {
-      return { ...doneItem, content: pendingItem.content };
+      return { ...doneItem, content: this.mergeAssistantMessageContent(doneItem, pendingItem) };
     }
 
     if (doneItem.type === "workflow" && pendingItem.type === "workflow") {
@@ -688,6 +688,42 @@ export abstract class ChatKitServer<TContext = unknown> {
     }
 
     return doneItem;
+  }
+
+  private mergeAssistantMessageContent(
+    doneItem: AssistantMessageItem,
+    pendingItem: AssistantMessageItem,
+  ): AssistantMessageItem["content"] {
+    const content: AssistantMessageItem["content"] = [];
+    const contentLength = Math.max(doneItem.content.length, pendingItem.content.length);
+
+    for (let index = 0; index < contentLength; index++) {
+      const donePart = doneItem.content[index];
+      const pendingPart = pendingItem.content[index];
+
+      if (!donePart) {
+        if (pendingPart) {
+          content.push(pendingPart);
+        }
+        continue;
+      }
+
+      if (!pendingPart) {
+        content.push(donePart);
+        continue;
+      }
+
+      content.push({
+        ...donePart,
+        text: donePart.text.length > 0 ? donePart.text : pendingPart.text,
+        annotations:
+          donePart.annotations.length > 0
+            ? donePart.annotations
+            : pendingPart.annotations,
+      });
+    }
+
+    return content;
   }
 
   protected applyAssistantMessageUpdate(
@@ -717,7 +753,10 @@ export abstract class ChatKitServer<TContext = unknown> {
       annotations.splice(update.annotation_index, 0, update.annotation);
       content[update.content_index] = { ...current, annotations };
     } else if (update.type === "assistant_message.content_part.done") {
-      content[update.content_index] = update.content;
+      content[update.content_index] =
+        update.content.annotations.length === 0 && current.annotations.length > 0
+          ? { ...update.content, annotations: current.annotations }
+          : update.content;
     }
 
     return { ...item, content };

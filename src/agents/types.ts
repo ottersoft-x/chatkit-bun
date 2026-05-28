@@ -1,6 +1,7 @@
 import type { Store } from "../store";
 import type { JsonValue } from "../serialization";
 import type { ThreadMetadata } from "../types/core";
+import type { ResponseStreamConverter } from "./annotations";
 
 export interface AgentContextOptions<TContext> {
   thread: ThreadMetadata;
@@ -12,6 +13,10 @@ export interface AgentContextOptions<TContext> {
 export interface AgentStreamInput {
   [Symbol.asyncIterator]?: () => AsyncIterator<unknown>;
   toStream?: () => AsyncIterable<unknown>;
+}
+
+export interface StreamAgentResponseOptions {
+  converter?: ResponseStreamConverter;
 }
 
 export interface ToolCallMetadata {

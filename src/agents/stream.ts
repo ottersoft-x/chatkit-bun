@@ -1,13 +1,16 @@
 import type { AssistantMessageContent } from "../types/core";
 import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
+import { convertTextContentPart, defaultResponseStreamConverter } from "./annotations";
+import type { ResponseStreamConverter } from "./annotations";
 import type { AgentContext } from "./context";
-import type { AgentStreamInput, ToolCallMetadata } from "./types";
+import type { AgentStreamInput, StreamAgentResponseOptions, ToolCallMetadata } from "./types";
 
 type UnknownRecord = Record<string, unknown>;
 
 interface AssistantTextState {
   activeItemId: string | null;
   textByPart: Map<string, string>;
+  annotationCountByPart: Map<string, number>;
 }
 
 type StreamSource = "sdk" | "context";
@@ -97,10 +100,23 @@ function partKey(itemId: string, contentIndex: number): string {
   return `${itemId}:${contentIndex}`;
 }
 
+function nextAnnotationIndex(state: AssistantTextState, itemId: string, contentIndex: number): number {
+  const key = partKey(itemId, contentIndex);
+  const index = state.annotationCountByPart.get(key) ?? 0;
+  state.annotationCountByPart.set(key, index + 1);
+  return index;
+}
+
 function clearAssistantTextState(state: AssistantTextState, itemId: string): void {
   for (const key of state.textByPart.keys()) {
     if (key.startsWith(`${itemId}:`)) {
       state.textByPart.delete(key);
+    }
+  }
+
+  for (const key of state.annotationCountByPart.keys()) {
+    if (key.startsWith(`${itemId}:`)) {
+      state.annotationCountByPart.delete(key);
     }
   }
 
@@ -126,20 +142,12 @@ function assistantItem<TContext>(
 function assistantContentFromItem(
   item: UnknownRecord,
   fallbackText: string,
+  converter: ResponseStreamConverter,
 ): AssistantMessageContent[] {
   const rawContent = Array.isArray(item.content) ? item.content : [];
   const content = rawContent.flatMap((part) => {
-    if (!isRecord(part)) {
-      return [];
-    }
-
-    const text = stringValue(part.text);
-
-    if (text === null) {
-      return [];
-    }
-
-    return [{ type: "output_text" as const, text, annotations: [] }];
+    const converted = convertTextContentPart(part, converter);
+    return converted ? [converted] : [];
   });
 
   if (content.length > 0) {
@@ -243,6 +251,7 @@ function convertSdkEvent<TContext>(
   context: AgentContext<TContext>,
   state: AssistantTextState,
   event: unknown,
+  converter: ResponseStreamConverter,
 ): ThreadStreamEvent[] {
   const rawData = rawResponseData(event);
 
@@ -299,7 +308,7 @@ function convertSdkEvent<TContext>(
         item: assistantItem(
           context,
           itemId,
-          assistantContentFromItem(item, fallbackText),
+          assistantContentFromItem(item, fallbackText, converter),
         ),
       };
 
@@ -352,6 +361,33 @@ function convertSdkEvent<TContext>(
       ];
     }
 
+    case "response.output_text.annotation.added": {
+      const itemId = stringValue(rawData.item_id) ?? state.activeItemId;
+      if (!itemId) {
+        return [];
+      }
+
+      const annotation = converter.convertAnnotation(rawData.annotation);
+      if (!annotation) {
+        return [];
+      }
+
+      const contentIndex = numberValue(rawData.content_index) ?? 0;
+
+      return [
+        {
+          type: "thread.item.updated",
+          item_id: itemId,
+          update: {
+            type: "assistant_message.content_part.annotation_added",
+            content_index: contentIndex,
+            annotation_index: nextAnnotationIndex(state, itemId, contentIndex),
+            annotation,
+          },
+        },
+      ];
+    }
+
     case "response.output_text.done": {
       const itemId = stringValue(rawData.item_id) ?? state.activeItemId;
 
@@ -393,7 +429,7 @@ function convertSdkEvent<TContext>(
       return [
         {
           type: "thread.item.done",
-          item: assistantItem(context, itemId, assistantContentFromItem(item, fallbackText)),
+          item: assistantItem(context, itemId, assistantContentFromItem(item, fallbackText, converter)),
         },
       ];
     }
@@ -435,10 +471,16 @@ function pendingClientToolCallEvent<TContext>(
 export async function* streamAgentResponse<TContext>(
   context: AgentContext<TContext>,
   streamedRun: AgentStreamInput | AsyncIterable<unknown>,
+  options: StreamAgentResponseOptions = {},
 ): AsyncIterable<ThreadStreamEvent> {
+  const converter = options.converter ?? defaultResponseStreamConverter;
   const sdkIterator = normalizeStream(streamedRun)[Symbol.asyncIterator]();
   const contextIterator = context.events()[Symbol.asyncIterator]();
-  const state: AssistantTextState = { activeItemId: null, textByPart: new Map() };
+  const state: AssistantTextState = {
+    activeItemId: null,
+    textByPart: new Map(),
+    annotationCountByPart: new Map(),
+  };
   const toolCallMetadataByName = new Map<string, ToolCallMetadata>();
   let sdkDone = false;
   let contextDone = false;
@@ -514,7 +556,7 @@ export async function* streamAgentResponse<TContext>(
         toolCallMetadataByName.set(metadata.name, metadata.metadata);
       }
 
-      for (const event of convertSdkEvent(context, state, next.result.value)) {
+      for (const event of convertSdkEvent(context, state, next.result.value, converter)) {
         yield ThreadStreamEventSchema.parse(event);
       }
     }
