@@ -1,10 +1,12 @@
-import type { ThreadItem, Workflow, WorkflowSummary } from "../types/core";
+import type { Task, ThreadItem, Workflow, WorkflowSummary } from "../types/core";
 import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
 import type { AgentContextOptions, JsonObject } from "./types";
 import {
+  appendWorkflowTask,
   createWorkflowItem,
   finishWorkflow,
   shouldEmitWorkflowAdded,
+  updateWorkflowTaskEvent,
   workflowAddedEvent,
 } from "./workflows";
 
@@ -115,6 +117,31 @@ export class AgentContext<TContext> {
     if (shouldEmitWorkflowAdded(item.workflow)) {
       this.stream(workflowAddedEvent(item));
     }
+  }
+
+  addWorkflowTask(task: Task): void {
+    if (!this.workflowItem) {
+      this.workflowItem = createWorkflowItem(this, {
+        type: "custom",
+        tasks: [],
+        expanded: false,
+      });
+    }
+
+    const shouldEmitAdded =
+      this.workflowItem.workflow.type !== "reasoning" &&
+      this.workflowItem.workflow.tasks.length === 0;
+    const event = appendWorkflowTask(this.workflowItem, task);
+
+    this.stream(shouldEmitAdded ? workflowAddedEvent(this.workflowItem) : event);
+  }
+
+  updateWorkflowTask(task: Task, taskIndex: number): void {
+    if (!this.workflowItem) {
+      throw new Error("Workflow is not set");
+    }
+
+    this.stream(updateWorkflowTaskEvent(this.workflowItem, task, taskIndex));
   }
 
   endWorkflow(summary?: WorkflowSummary, expanded = false): void {

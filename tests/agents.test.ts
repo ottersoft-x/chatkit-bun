@@ -615,6 +615,227 @@ describe("AgentContext", () => {
     expect(agentContext.workflowItem).toBeNull();
   });
 
+  test("addWorkflowTask lazily starts custom workflows and emits the first task as the added item", async () => {
+    const agentContext = createContext();
+
+    agentContext.addWorkflowTask({ type: "custom", title: "Fetch data", status_indicator: "loading" });
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Fetch data", status_indicator: "loading" }],
+            expanded: false,
+          },
+        },
+      },
+    ]);
+    expect(agentContext.workflowItem?.workflow.tasks).toEqual([
+      { type: "custom", title: "Fetch data", status_indicator: "loading" },
+    ]);
+  });
+
+  test("addWorkflowTask emits task updates for subsequent workflow tasks", async () => {
+    const agentContext = createContext();
+
+    agentContext.addWorkflowTask({ type: "custom", title: "Fetch data", status_indicator: "complete" });
+    agentContext.addWorkflowTask({ type: "custom", title: "Analyze data", status_indicator: "loading" });
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Fetch data", status_indicator: "complete" }],
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.added",
+          task_index: 1,
+          task: { type: "custom", title: "Analyze data", status_indicator: "loading" },
+        },
+      },
+    ]);
+    expect(agentContext.workflowItem?.workflow.tasks).toEqual([
+      { type: "custom", title: "Fetch data", status_indicator: "complete" },
+      { type: "custom", title: "Analyze data", status_indicator: "loading" },
+    ]);
+  });
+
+  test("addWorkflowTask emits task updates when a reasoning workflow is already active", async () => {
+    const agentContext = createContext();
+
+    agentContext.startWorkflow({ type: "reasoning", tasks: [], expanded: false });
+    agentContext.addWorkflowTask({ type: "thought", content: "Thinking", status_indicator: "none" });
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "reasoning",
+            tasks: [],
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.added",
+          task_index: 0,
+          task: { type: "thought", content: "Thinking", status_indicator: "none" },
+        },
+      },
+    ]);
+  });
+
+  test("updateWorkflowTask replaces workflow tasks and emits task updates", async () => {
+    const agentContext = createContext();
+
+    agentContext.addWorkflowTask({ type: "custom", title: "Fetch data", status_indicator: "loading" });
+    agentContext.updateWorkflowTask(
+      { type: "custom", title: "Fetch data", status_indicator: "complete" },
+      0,
+    );
+    agentContext.closeEvents();
+
+    await expect(collect(agentContext.events())).resolves.toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "workflow_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "workflow",
+          workflow: {
+            type: "custom",
+            tasks: [{ type: "custom", title: "Fetch data", status_indicator: "loading" }],
+            expanded: false,
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "workflow_generated",
+        update: {
+          type: "workflow.task.updated",
+          task_index: 0,
+          task: { type: "custom", title: "Fetch data", status_indicator: "complete" },
+        },
+      },
+    ]);
+    expect(agentContext.workflowItem?.workflow.tasks).toEqual([
+      { type: "custom", title: "Fetch data", status_indicator: "complete" },
+    ]);
+  });
+
+  test("updateWorkflowTask throws when no workflow is active", () => {
+    const agentContext = createContext();
+
+    expect(() =>
+      agentContext.updateWorkflowTask(
+        { type: "custom", title: "Fetch data", status_indicator: "complete" },
+        0,
+      ),
+    ).toThrow("Workflow is not set");
+  });
+
+  test("updateWorkflowTask throws before mutating state when the index is out of range", () => {
+    const agentContext = createContext();
+
+    agentContext.addWorkflowTask({ type: "custom", title: "Fetch data", status_indicator: "loading" });
+
+    expect(() =>
+      agentContext.updateWorkflowTask(
+        { type: "custom", title: "Fetch data", status_indicator: "complete" },
+        1,
+      ),
+    ).toThrow("Workflow task index is out of range");
+    expect(agentContext.workflowItem?.workflow.tasks).toEqual([
+      { type: "custom", title: "Fetch data", status_indicator: "loading" },
+    ]);
+  });
+
+  test("addWorkflowTask clones caller-provided tasks", async () => {
+    const agentContext = createContext();
+    const task = { type: "custom" as const, title: "Fetch data", status_indicator: "loading" as const };
+
+    agentContext.addWorkflowTask(task);
+    task.title = "Mutated outside context";
+    agentContext.endWorkflow();
+    agentContext.closeEvents();
+
+    const events = await collect(agentContext.events());
+    expect(events.at(-1)).toEqual({
+      type: "thread.item.done",
+      item: {
+        id: "workflow_generated",
+        thread_id: "thr_1",
+        created_at: now,
+        type: "workflow",
+        workflow: {
+          type: "custom",
+          tasks: [{ type: "custom", title: "Fetch data", status_indicator: "loading" }],
+          summary: { duration: 0 },
+          expanded: false,
+        },
+      },
+    });
+  });
+
+  test("updateWorkflowTask clones caller-provided tasks", async () => {
+    const agentContext = createContext();
+    const task = { type: "custom" as const, title: "Fetch data", status_indicator: "complete" as const };
+
+    agentContext.addWorkflowTask({ type: "custom", title: "Fetch data", status_indicator: "loading" });
+    agentContext.updateWorkflowTask(task, 0);
+    task.title = "Mutated outside context";
+    agentContext.endWorkflow();
+    agentContext.closeEvents();
+
+    const events = await collect(agentContext.events());
+    expect(events.at(-1)).toEqual({
+      type: "thread.item.done",
+      item: {
+        id: "workflow_generated",
+        thread_id: "thr_1",
+        created_at: now,
+        type: "workflow",
+        workflow: {
+          type: "custom",
+          tasks: [{ type: "custom", title: "Fetch data", status_indicator: "complete" }],
+          summary: { duration: 0 },
+          expanded: false,
+        },
+      },
+    });
+  });
+
   test("queues validated stream events", async () => {
     const agentContext = createContext();
 

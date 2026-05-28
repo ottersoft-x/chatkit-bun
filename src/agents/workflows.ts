@@ -1,4 +1,11 @@
-import { WorkflowSchema, type ThreadItem, type Workflow, type WorkflowSummary } from "../types/core";
+import {
+  TaskSchema,
+  WorkflowSchema,
+  type Task,
+  type ThreadItem,
+  type Workflow,
+  type WorkflowSummary,
+} from "../types/core";
 import type { ThreadStreamEvent } from "../types/server";
 import type { AgentContext } from "./context";
 
@@ -42,6 +49,66 @@ export function workflowAddedEvent(workflow: WorkflowItem): ThreadItemAddedEvent
     type: "thread.item.added",
     item: workflow,
   };
+}
+
+export function createThoughtTask(content: string): ThoughtTask {
+  return {
+    type: "thought",
+    content,
+    status_indicator: "none",
+  };
+}
+
+export function workflowTaskAddedEvent(
+  workflow: WorkflowItem,
+  task: Task,
+  taskIndex: number,
+): ThreadItemUpdatedEvent {
+  return {
+    type: "thread.item.updated",
+    item_id: workflow.id,
+    update: {
+      type: "workflow.task.added",
+      task_index: taskIndex,
+      task,
+    },
+  };
+}
+
+export function workflowTaskUpdatedEvent(
+  workflow: WorkflowItem,
+  task: Task,
+  taskIndex: number,
+): ThreadItemUpdatedEvent {
+  return {
+    type: "thread.item.updated",
+    item_id: workflow.id,
+    update: {
+      type: "workflow.task.updated",
+      task_index: taskIndex,
+      task,
+    },
+  };
+}
+
+export function appendWorkflowTask(workflow: WorkflowItem, task: Task): ThreadItemUpdatedEvent {
+  const parsedTask = TaskSchema.parse(task);
+  workflow.workflow.tasks.push(parsedTask);
+  return workflowTaskAddedEvent(workflow, parsedTask, workflow.workflow.tasks.length - 1);
+}
+
+export function updateWorkflowTaskEvent(
+  workflow: WorkflowItem,
+  task: Task,
+  taskIndex: number,
+): ThreadItemUpdatedEvent {
+  if (taskIndex < 0 || taskIndex >= workflow.workflow.tasks.length) {
+    throw new RangeError("Workflow task index is out of range");
+  }
+
+  const parsedTask = TaskSchema.parse(task);
+  workflow.workflow.tasks[taskIndex] = parsedTask;
+  return workflowTaskUpdatedEvent(workflow, parsedTask, taskIndex);
 }
 
 export function durationSeconds(startedAt: string, endedAt: string): number {

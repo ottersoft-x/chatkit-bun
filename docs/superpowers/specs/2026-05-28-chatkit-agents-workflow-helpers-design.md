@@ -77,7 +77,8 @@ workflow state object.
 `addWorkflowTask(task)` should:
 
 - Lazily create a custom workflow if `workflowItem` is `null`.
-- Append the task to `workflowItem.workflow.tasks`.
+- Clone and normalize the caller-provided task through the existing task schema.
+- Append the normalized task to `workflowItem.workflow.tasks`.
 - If this is the first task in a non-reasoning workflow that has not yet been
   emitted, emit `thread.item.added` with the workflow item.
 - Otherwise emit `thread.item.updated` with `workflow.task.added` and the new
@@ -88,7 +89,8 @@ workflow state object.
 - Throw `Error("Workflow is not set")` if no workflow is active.
 - Throw `RangeError("Workflow task index is out of range")` if `taskIndex`
   does not refer to an existing task in the active workflow.
-- Replace `workflowItem.workflow.tasks[taskIndex]` with the provided task.
+- Clone and normalize the caller-provided task through the existing task schema.
+- Replace `workflowItem.workflow.tasks[taskIndex]` with the normalized task.
 - Emit `thread.item.updated` with `workflow.task.updated` and the provided
   index.
 

@@ -685,7 +685,8 @@ Expected:
 
 - [ ] **Step 3: Add task helper functions to `src/agents/workflows.ts`**
 
-In `src/agents/workflows.ts`, add this after `workflowAddedEvent(...)`:
+In `src/agents/workflows.ts`, import `TaskSchema` as a value and `Task` as a
+type from `../types/core`, then add this after `workflowAddedEvent(...)`:
 
 ```ts
 export function createThoughtTask(content: string): ThoughtTask {
@@ -729,8 +730,9 @@ export function workflowTaskUpdatedEvent(
 }
 
 export function appendWorkflowTask(workflow: WorkflowItem, task: Task): ThreadItemUpdatedEvent {
-  workflow.workflow.tasks.push(task);
-  return workflowTaskAddedEvent(workflow, task, workflow.workflow.tasks.length - 1);
+  const parsedTask = TaskSchema.parse(task);
+  workflow.workflow.tasks.push(parsedTask);
+  return workflowTaskAddedEvent(workflow, parsedTask, workflow.workflow.tasks.length - 1);
 }
 
 export function updateWorkflowTaskEvent(
@@ -742,8 +744,9 @@ export function updateWorkflowTaskEvent(
     throw new RangeError("Workflow task index is out of range");
   }
 
-  workflow.workflow.tasks[taskIndex] = task;
-  return workflowTaskUpdatedEvent(workflow, task, taskIndex);
+  const parsedTask = TaskSchema.parse(task);
+  workflow.workflow.tasks[taskIndex] = parsedTask;
+  return workflowTaskUpdatedEvent(workflow, parsedTask, taskIndex);
 }
 ```
 
