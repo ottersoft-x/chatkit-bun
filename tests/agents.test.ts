@@ -495,6 +495,104 @@ describe("streamAgentResponse", () => {
     await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
   });
 
+  test("emits a deferred pending client tool call with SDK metadata", async () => {
+    const agentContext = createContext();
+    agentContext.setClientToolCall(new ClientToolCall("get_selection", { includeHtml: true }));
+
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          {
+            type: "run_item_stream_event",
+            item: {
+              type: "tool_call_item",
+              raw_item: {
+                type: "function_call",
+                id: "fc_123",
+                call_id: "call_123",
+              },
+            },
+          },
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "fc_123",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "client_tool_call",
+          status: "pending",
+          call_id: "call_123",
+          name: "get_selection",
+          arguments: { includeHtml: true },
+        },
+      },
+    ]);
+  });
+
+  test("generates fallback client tool ids when SDK metadata is absent", async () => {
+    const agentContext = createContext();
+    agentContext.setClientToolCall(new ClientToolCall("get_selection"));
+
+    const events = await collect(streamAgentResponse(agentContext, streamedRun([])));
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "tool_call_generated",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "client_tool_call",
+          status: "pending",
+          call_id: "tool_call_generated",
+          name: "get_selection",
+          arguments: {},
+        },
+      },
+    ]);
+  });
+
+  test("cancelling the merged stream returns the SDK iterator", async () => {
+    const agentContext = createContext();
+    let returned = false;
+    const iterator = streamAgentResponse(
+      agentContext,
+      streamFrom(
+        [
+          rawResponse({
+            type: "response.output_text.delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "first",
+          }),
+          rawResponse({
+            type: "response.output_text.delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "second",
+          }),
+        ],
+        () => {
+          returned = true;
+        },
+      ),
+    )[Symbol.asyncIterator]();
+
+    await expect(iterator.next()).resolves.toMatchObject({ done: false });
+    await iterator.return?.();
+
+    expect(returned).toBe(true);
+    expect(() => agentContext.stream({ type: "progress_update", text: "late" })).toThrow(
+      "Cannot stream events after the agent context has completed.",
+    );
+  });
+
   test("ignores unknown SDK events in the first slice", async () => {
     const agentContext = createContext();
 
