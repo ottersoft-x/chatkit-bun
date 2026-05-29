@@ -237,7 +237,6 @@ describe("parity matrix", () => {
         .map((row) => row.id),
     );
 
-    expect(deferredIds).toContain("agents-previous-response-id");
     expect(deferredIds).toContain("annotations-entity-sources");
     expect(deferredIds).toContain("annotations-input-replay");
     expect(deferredIds).toContain("attachments-content-conversion");

@@ -7,6 +7,7 @@ export interface AgentContextOptions<TContext> {
   thread: ThreadMetadata;
   store: Store<TContext>;
   context: TContext;
+  previousResponseId?: string | null;
   now?: () => Date | string;
 }
 

@@ -220,17 +220,22 @@
     {
       "id": "agents-previous-response-id",
       "area": "agents-output",
-      "status": "deferred",
+      "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
+        "files": [
+          "packages/chatkit-python/chatkit/agents.py",
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
         "tests": []
       },
       "bun": {
-        "tests": [],
-        "sources": [],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-parity-foundation-design.md"]
+        "tests": ["tests/agents.test.ts", "tests/parity-smoke.test.ts"],
+        "sources": ["src/agents/context.ts", "src/agents/types.ts"],
+        "docs": [
+          "docs/superpowers/specs/2026-05-29-chatkit-agents-previous-response-id-design.md"
+        ]
       },
-      "notes": "Python AgentContext tracks previous_response_id; Bun has not added that state or API surface."
+      "notes": "Bun AgentContext stores previousResponseId state for OpenAI Responses API chaining while leaving persistence and run options application-owned."
     },
     {
       "id": "annotations-entity-sources",

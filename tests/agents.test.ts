@@ -580,15 +580,29 @@ describe("ResponseStreamConverter", () => {
 });
 
 describe("AgentContext", () => {
-  test("stores thread, store, request context, and deterministic timestamps", () => {
+  test("stores thread, store, request context, previous response id, and deterministic timestamps", () => {
     const agentContext = createContext();
 
     expect(agentContext.thread).toEqual(thread);
     expect(agentContext.context).toEqual(requestContext);
+    expect(agentContext.previousResponseId).toBeNull();
     expect(agentContext.createdAt()).toBe(now);
     expect(agentContext.store.generateItemId("tool_call", thread, requestContext)).toBe(
       "tool_call_generated",
     );
+  });
+
+  test("preserves an explicit previous response id", () => {
+    const agentContext = new AgentContext({
+      thread,
+      store: new TestStore(),
+      context: requestContext,
+      previousResponseId: "resp_previous_123",
+      now: () => now,
+    });
+
+    expect(agentContext.previousResponseId).toBe("resp_previous_123");
+    expect(agentContext.createdAt()).toBe(now);
   });
 
   test("tracks the active workflow item for stream conversion", () => {

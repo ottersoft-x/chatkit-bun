@@ -88,6 +88,7 @@ export class AgentContext<TContext> {
   readonly thread: AgentContextOptions<TContext>["thread"];
   readonly store: AgentContextOptions<TContext>["store"];
   readonly context: TContext;
+  readonly previousResponseId: string | null;
   workflowItem: WorkflowItem | null = null;
   private readonly now: () => Date | string;
   private readonly queue = new AsyncEventQueue<ThreadStreamEvent>();
@@ -97,6 +98,7 @@ export class AgentContext<TContext> {
     this.thread = options.thread;
     this.store = options.store;
     this.context = options.context;
+    this.previousResponseId = options.previousResponseId ?? null;
     this.now = options.now ?? (() => new Date());
   }
 
