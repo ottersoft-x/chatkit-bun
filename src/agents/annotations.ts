@@ -126,7 +126,16 @@ export function convertTextContentPart(
   part: unknown,
   converter: ResponseStreamConverter,
 ): ConvertedTextContent | null {
-  if (!isRecord(part) || part.type !== "output_text") {
+  if (!isRecord(part)) {
+    return null;
+  }
+
+  if (part.type === "refusal") {
+    const text = stringValue(part.refusal);
+    return text === null ? null : { type: "output_text", text, annotations: [] };
+  }
+
+  if (part.type !== "output_text") {
     return null;
   }
 

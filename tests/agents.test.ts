@@ -2334,6 +2334,193 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("maps response.content_part.added output text and refusal parts", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "message", id: "msg_parts" },
+          }),
+          rawResponse({
+            type: "response.content_part.added",
+            item_id: "msg_parts",
+            content_index: 0,
+            part: {
+              type: "output_text",
+              text: "Visible text",
+              annotations: [
+                {
+                  type: "url_citation",
+                  url: "https://example.com/source",
+                  title: "Example Source",
+                  end_index: 12,
+                },
+              ],
+            },
+          }),
+          rawResponse({
+            type: "response.content_part.added",
+            item_id: "msg_parts",
+            content_index: 1,
+            part: { type: "refusal", refusal: "I can't help with that." },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_parts",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_parts",
+        update: {
+          type: "assistant_message.content_part.added",
+          content_index: 0,
+          content: {
+            type: "output_text",
+            text: "Visible text",
+            annotations: [
+              {
+                type: "annotation",
+                source: {
+                  type: "url",
+                  url: "https://example.com/source",
+                  title: "Example Source",
+                },
+                index: 12,
+              },
+            ],
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_parts",
+        update: {
+          type: "assistant_message.content_part.added",
+          content_index: 1,
+          content: { type: "output_text", text: "I can't help with that.", annotations: [] },
+        },
+      },
+    ]);
+  });
+
+  test("ignores reasoning text content parts", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "message", id: "msg_reasoning_part" },
+          }),
+          rawResponse({
+            type: "response.content_part.added",
+            item_id: "msg_reasoning_part",
+            content_index: 0,
+            part: { type: "reasoning_text", text: "private reasoning" },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_reasoning_part",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+    ]);
+  });
+
+  test("maps refusal delta and done events to assistant text updates", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "message", id: "msg_refusal_stream" },
+          }),
+          rawResponse({
+            type: "response.refusal.delta",
+            item_id: "msg_refusal_stream",
+            content_index: 0,
+            delta: "I can't",
+          }),
+          rawResponse({
+            type: "response.refusal.delta",
+            item_id: "msg_refusal_stream",
+            content_index: 0,
+            delta: " help.",
+          }),
+          rawResponse({
+            type: "response.refusal.done",
+            item_id: "msg_refusal_stream",
+            content_index: 0,
+            refusal: "I can't help.",
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_refusal_stream",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_refusal_stream",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "I can't",
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_refusal_stream",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: " help.",
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_refusal_stream",
+        update: {
+          type: "assistant_message.content_part.done",
+          content_index: 0,
+          content: { type: "output_text", text: "I can't help.", annotations: [] },
+        },
+      },
+    ]);
+  });
+
   test("maps normalized assistant text events from the Agents SDK", async () => {
     const agentContext = createContext();
     const events = await collect(
@@ -2399,6 +2586,96 @@ describe("streamAgentResponse", () => {
           created_at: now,
           type: "assistant_message",
           content: [{ type: "output_text", text: "Hello, world!", annotations: [] }],
+        },
+      },
+    ]);
+  });
+
+  test("preserves refusal parts in final assistant messages", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: { type: "message", id: "msg_refusal" },
+          }),
+          rawResponse({
+            type: "response.output_item.done",
+            item: {
+              type: "message",
+              id: "msg_refusal",
+              content: [
+                { type: "output_text", text: "Allowed text", annotations: [] },
+                { type: "refusal", refusal: "I can't help with that." },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_refusal",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+      {
+        type: "thread.item.done",
+        item: {
+          id: "msg_refusal",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [
+            { type: "output_text", text: "Allowed text", annotations: [] },
+            { type: "output_text", text: "I can't help with that.", annotations: [] },
+          ],
+        },
+      },
+    ]);
+  });
+
+  test("preserves refusal parts from normalized response_done events", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawModel({
+            type: "response_done",
+            response: {
+              id: "resp_refusal",
+              output: [
+                {
+                  type: "message",
+                  id: "msg_refusal",
+                  role: "assistant",
+                  status: "completed",
+                  content: [{ type: "refusal", refusal: "No, I cannot comply." }],
+                },
+              ],
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "msg_refusal",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [{ type: "output_text", text: "No, I cannot comply.", annotations: [] }],
         },
       },
     ]);
