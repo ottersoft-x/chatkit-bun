@@ -290,17 +290,29 @@
     {
       "id": "non-text-assistant-content",
       "area": "agents-output",
-      "status": "deferred",
+      "status": "not-applicable",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
+        "files": [
+          "packages/chatkit-python/chatkit/agents.py",
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
         "tests": ["test_stream_agent_response_assistant_message_content_types"]
       },
       "bun": {
-        "tests": [],
-        "sources": [],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-refusal-content-part-design.md"]
+        "tests": ["tests/agents.test.ts", "tests/server.test.ts", "tests/parity-smoke.test.ts"],
+        "sources": [
+          "src/types/core.ts",
+          "src/types/server.ts",
+          "src/agents/annotations.ts",
+          "src/agents/stream.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-refusal-content-part-design.md",
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-generated-images-design.md",
+          "docs/superpowers/specs/2026-05-29-chatkit-non-text-assistant-content-design.md"
+        ]
       },
-      "notes": "Text and refusal content are covered; additional non-text assistant content parts are deferred until ChatKit wire support is defined."
+      "notes": "The pinned assistant-message content contract only exposes output text and refusal content, both covered locally. Generated images are represented as separate generated_image thread items, so there is no additional non-text assistant-message content part to implement for this upstream version."
     }
   ]
 }

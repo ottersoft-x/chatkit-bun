@@ -51,6 +51,12 @@ async function expectLocalFilesExist(rowId: string, paths: string[]): Promise<vo
   }
 }
 
+function expectParityRow(id: string): ParityRow {
+  const row = (matrix.rows as ParityRow[]).find((candidate) => candidate.id === id);
+  expect(row, `missing parity row ${id}`).toBeTruthy();
+  return row!;
+}
+
 interface RequestContext {
   userId: string;
 }
@@ -239,7 +245,33 @@ describe("parity matrix", () => {
 
     expect(deferredIds).toContain("annotations-entity-sources");
     expect(deferredIds).toContain("annotations-input-replay");
-    expect(deferredIds).toContain("non-text-assistant-content");
+    expect(deferredIds).not.toContain("non-text-assistant-content");
+  });
+
+  test("classifies non-text assistant content against the pinned contract", () => {
+    const row = expectParityRow("non-text-assistant-content");
+
+    expect(row.status).toBe("not-applicable");
+    expect(row.bun?.tests).toEqual(
+      expect.arrayContaining(["tests/agents.test.ts", "tests/server.test.ts", "tests/parity-smoke.test.ts"]),
+    );
+    expect(row.bun?.sources).toEqual(
+      expect.arrayContaining([
+        "src/types/core.ts",
+        "src/types/server.ts",
+        "src/agents/annotations.ts",
+        "src/agents/stream.ts",
+      ]),
+    );
+    expect(row.bun?.docs).toEqual(
+      expect.arrayContaining([
+        "docs/superpowers/specs/2026-05-28-chatkit-agents-refusal-content-part-design.md",
+        "docs/superpowers/specs/2026-05-28-chatkit-agents-generated-images-design.md",
+        "docs/superpowers/specs/2026-05-29-chatkit-non-text-assistant-content-design.md",
+      ]),
+    );
+    expect(row.notes).toEqual(expect.stringContaining("output text and refusal"));
+    expect(row.notes).toEqual(expect.stringContaining("generated_image"));
   });
 });
 
