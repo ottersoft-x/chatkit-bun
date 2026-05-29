@@ -103,8 +103,8 @@ export class ResponseStreamConverter {
     }
 
     const url = nonEmptyStringValue(annotation.url);
-    const title = nonEmptyStringValue(annotation.title);
-    if (!url || !title) {
+    const title = stringValue(annotation.title);
+    if (!url || title === null) {
       return null;
     }
 
