@@ -9,8 +9,10 @@ import {
   type AssistantMessageItem,
   type ClientToolCallItem,
   type EndOfTurnItem,
+  type FileAttachment,
   type GeneratedImageItem,
   type HiddenContextItem,
+  type ImageAttachment,
   type SDKHiddenContextItem,
   type StructuredInputItem,
   type TaskItem,
@@ -37,6 +39,29 @@ function userMessage(
   };
 }
 
+function fileAttachment(overrides: Partial<FileAttachment> = {}): FileAttachment {
+  return {
+    id: "file_1",
+    type: "file",
+    mime_type: "application/pdf",
+    name: "brief.pdf",
+    metadata: { source: "test" },
+    ...overrides,
+  };
+}
+
+function imageAttachment(overrides: Partial<ImageAttachment> = {}): ImageAttachment {
+  return {
+    id: "image_1",
+    type: "image",
+    mime_type: "image/png",
+    name: "diagram.png",
+    preview_url: "https://example.com/diagram.png",
+    metadata: { source: "test" },
+    ...overrides,
+  };
+}
+
 describe("ThreadItemConverter", () => {
   test("converts a single user message through the default helper", async () => {
     await expect(simpleToAgentInput(userMessage())).resolves.toEqual([
@@ -50,6 +75,47 @@ describe("ThreadItemConverter", () => {
 
   test("exposes an overridable converter class", () => {
     expect(new ThreadItemConverter()).toBeInstanceOf(ThreadItemConverter);
+  });
+
+  test("throws for attachments by default", async () => {
+    await expect(
+      simpleToAgentInput(
+        userMessage({
+          attachments: [fileAttachment()],
+        }),
+      ),
+    ).rejects.toThrow("ThreadItemConverter.attachmentToMessageContent");
+  });
+
+  test("converts attachments through an override in attachment order", async () => {
+    class AttachmentConverter extends ThreadItemConverter {
+      override attachmentToMessageContent(attachment: FileAttachment | ImageAttachment) {
+        if (attachment.type === "image") {
+          return { type: "input_image" as const, image: attachment.preview_url, detail: "auto" };
+        }
+
+        return { type: "input_file" as const, file: { id: attachment.id }, filename: attachment.name };
+      }
+    }
+
+    const input = await new AttachmentConverter().toAgentInput(
+      userMessage({
+        content: [{ type: "input_text", text: "Review these attachments" }],
+        attachments: [fileAttachment(), imageAttachment()],
+      }),
+    );
+
+    expect(input).toEqual([
+      {
+        type: "message",
+        role: "user",
+        content: [
+          { type: "input_text", text: "Review these attachments" },
+          { type: "input_file", file: { id: "file_1" }, filename: "brief.pdf" },
+          { type: "input_image", image: "https://example.com/diagram.png", detail: "auto" },
+        ],
+      },
+    ]);
   });
 
   test("allows async converter hook overrides", async () => {
