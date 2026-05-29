@@ -485,6 +485,23 @@ describe("ResponseStreamConverter", () => {
       },
       index: 15,
     });
+
+    expect(
+      converter.convertAnnotation({
+        type: "url_citation",
+        url: "https://example.com/untitled",
+        title: "",
+        end_index: 20,
+      }),
+    ).toEqual({
+      type: "annotation",
+      source: {
+        type: "url",
+        url: "https://example.com/untitled",
+        title: "",
+      },
+      index: 20,
+    });
   });
 
   test("drops invalid or unsupported citation annotations", () => {
@@ -511,6 +528,30 @@ describe("ResponseStreamConverter", () => {
       converter.convertAnnotation({
         type: "url_citation",
         url: "https://example.com",
+        end_index: 4,
+      }),
+    ).toBeNull();
+    expect(
+      converter.convertAnnotation({
+        type: "url_citation",
+        url: "https://example.com",
+        title: null,
+        end_index: 4,
+      }),
+    ).toBeNull();
+    expect(
+      converter.convertAnnotation({
+        type: "url_citation",
+        url: "https://example.com",
+        title: 123,
+        end_index: 4,
+      }),
+    ).toBeNull();
+    expect(
+      converter.convertAnnotation({
+        type: "url_citation",
+        url: "",
+        title: "Empty URL",
         end_index: 4,
       }),
     ).toBeNull();
@@ -3904,6 +3945,138 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("compacts streaming annotation indices per content part", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_text.annotation.added",
+            item_id: "msg_multi_part",
+            content_index: 1,
+            annotation_index: 0,
+            annotation: {
+              type: "file_citation",
+              file_id: "file_invalid",
+              filename: "",
+              index: 0,
+            },
+          }),
+          rawResponse({
+            type: "response.output_text.annotation.added",
+            item_id: "msg_multi_part",
+            content_index: 1,
+            annotation_index: 1,
+            annotation: {
+              type: "url_citation",
+              url: "https://example.com/part-one",
+              title: "Part One",
+              end_index: 8,
+            },
+          }),
+          rawResponse({
+            type: "response.output_text.annotation.added",
+            item_id: "msg_multi_part",
+            content_index: 0,
+            annotation_index: 2,
+            annotation: {
+              type: "container_file_citation",
+              container_id: "container_1",
+              file_id: "file_123",
+              filename: "container.txt",
+              end_index: 3,
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.updated",
+        item_id: "msg_multi_part",
+        update: {
+          type: "assistant_message.content_part.annotation_added",
+          content_index: 1,
+          annotation_index: 0,
+          annotation: {
+            type: "annotation",
+            source: { type: "url", url: "https://example.com/part-one", title: "Part One" },
+            index: 8,
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_multi_part",
+        update: {
+          type: "assistant_message.content_part.annotation_added",
+          content_index: 0,
+          annotation_index: 0,
+          annotation: {
+            type: "annotation",
+            source: { type: "file", filename: "container.txt", title: "container.txt" },
+            index: 3,
+          },
+        },
+      },
+    ]);
+  });
+
+  test("emits output text done events without annotations after streaming annotations", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_text.annotation.added",
+            item_id: "msg_done_annotations",
+            content_index: 0,
+            annotation_index: 0,
+            annotation: {
+              type: "url_citation",
+              url: "https://example.com",
+              title: "Example",
+              end_index: 5,
+            },
+          }),
+          rawResponse({
+            type: "response.output_text.done",
+            item_id: "msg_done_annotations",
+            content_index: 0,
+            text: "Hello!",
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.updated",
+        item_id: "msg_done_annotations",
+        update: {
+          type: "assistant_message.content_part.annotation_added",
+          content_index: 0,
+          annotation_index: 0,
+          annotation: {
+            type: "annotation",
+            source: { type: "url", url: "https://example.com", title: "Example" },
+            index: 5,
+          },
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_done_annotations",
+        update: {
+          type: "assistant_message.content_part.done",
+          content_index: 0,
+          content: { type: "output_text", text: "Hello!", annotations: [] },
+        },
+      },
+    ]);
+  });
+
   test("uses custom converters for streaming annotation events", async () => {
     class CustomConverter extends ResponseStreamConverter {
       readonly calls: string[] = [];
@@ -4029,6 +4202,134 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("filters mixed final assistant content annotations", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.done",
+            item: {
+              type: "message",
+              id: "msg_mixed_annotations",
+              content: [
+                {
+                  type: "output_text",
+                  text: "See the cited sources.",
+                  annotations: [
+                    {
+                      type: "file_citation",
+                      file_id: "file_123",
+                      filename: "report.pdf",
+                      index: 0,
+                    },
+                    {
+                      type: "file_path",
+                      file_id: "file_path_1",
+                      index: 2,
+                    },
+                    {
+                      type: "container_file_citation",
+                      container_id: "container_1",
+                      file_id: "file_456",
+                      filename: "container.txt",
+                      start_index: 1,
+                      end_index: 4,
+                    },
+                    {
+                      type: "url_citation",
+                      url: "https://example.com/untitled",
+                      title: "",
+                      start_index: 5,
+                      end_index: 12,
+                    },
+                    {
+                      type: "url_citation",
+                      url: "https://example.com/bad-title",
+                      title: 123,
+                      end_index: 13,
+                    },
+                    {
+                      type: "file_citation",
+                      file_id: "file_empty",
+                      filename: "",
+                      index: 14,
+                    },
+                    "not an annotation",
+                  ],
+                },
+                { type: "refusal", refusal: "I can't summarize the hidden material." },
+                {
+                  type: "output_text",
+                  text: "Second content part.",
+                  annotations: [
+                    {
+                      type: "url_citation",
+                      url: "https://example.com/second",
+                      title: "Second",
+                      end_index: 6,
+                    },
+                  ],
+                },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.done",
+        item: {
+          id: "msg_mixed_annotations",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [
+            {
+              type: "output_text",
+              text: "See the cited sources.",
+              annotations: [
+                {
+                  type: "annotation",
+                  source: { type: "file", filename: "report.pdf", title: "report.pdf" },
+                  index: 0,
+                },
+                {
+                  type: "annotation",
+                  source: { type: "file", filename: "container.txt", title: "container.txt" },
+                  index: 4,
+                },
+                {
+                  type: "annotation",
+                  source: { type: "url", url: "https://example.com/untitled", title: "" },
+                  index: 12,
+                },
+              ],
+            },
+            {
+              type: "output_text",
+              text: "I can't summarize the hidden material.",
+              annotations: [],
+            },
+            {
+              type: "output_text",
+              text: "Second content part.",
+              annotations: [
+                {
+                  type: "annotation",
+                  source: { type: "url", url: "https://example.com/second", title: "Second" },
+                  index: 6,
+                },
+              ],
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   test("includes converted annotations in normalized response_done outputs", async () => {
     const events = await collect(
       streamAgentResponse(
@@ -4084,6 +4385,76 @@ describe("streamAgentResponse", () => {
                 type: "annotation",
                 source: { type: "file", filename: "report.pdf", title: "report.pdf" },
                 index: 4,
+              },
+            ],
+          },
+        ],
+      },
+    });
+  });
+
+  test("filters normalized response_done annotations", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawModel({
+            type: "response_done",
+            response: {
+              id: "resp_filter_annotations",
+              output: [
+                {
+                  type: "message",
+                  id: "msg_filtered",
+                  role: "assistant",
+                  status: "completed",
+                  content: [
+                    {
+                      type: "output_text",
+                      text: "Filtered annotations.",
+                      annotations: [
+                        {
+                          type: "container_file_citation",
+                          container_id: "container_1",
+                          file_id: "file_123",
+                          filename: "container.txt",
+                          end_index: 8,
+                        },
+                        { type: "file_path", file_id: "file_path_1", index: 3 },
+                        {
+                          type: "url_citation",
+                          url: "https://example.com/no-title",
+                          title: null,
+                          end_index: 9,
+                        },
+                      ],
+                    },
+                  ],
+                },
+              ],
+              usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events.at(-1)).toEqual({
+      type: "thread.item.done",
+      item: {
+        id: "msg_filtered",
+        thread_id: "thr_1",
+        created_at: now,
+        type: "assistant_message",
+        content: [
+          {
+            type: "output_text",
+            text: "Filtered annotations.",
+            annotations: [
+              {
+                type: "annotation",
+                source: { type: "file", filename: "container.txt", title: "container.txt" },
+                index: 8,
               },
             ],
           },
