@@ -4,7 +4,7 @@
 
 **Goal:** Make `chatkit-bun` usable from a private GitHub install in a Bun server that also uses `@openai/agents`, without requiring build output.
 
-**Architecture:** Keep the runtime APIs unchanged and make the package boundary explicit with source exports that point to `src/index.ts`. Add a reference example server that demonstrates the intended integration: ChatKit HTTP handler, `ChatKitServer`, `SQLiteStore`, Agents `run()`, and `streamAgentResponse()`.
+**Architecture:** Keep the runtime APIs unchanged and make the package boundary explicit with source exports that point to `src/index.ts`. Document a reference example server in the README that demonstrates the intended integration: ChatKit HTTP handler, `ChatKitServer`, `SQLiteStore`, Agents `run()`, and `streamAgentResponse()`.
 
 **Tech Stack:** Bun, TypeScript, `@openai/agents`, `zod`, existing `chatkit-bun` server and agents helpers.
 
@@ -29,15 +29,14 @@ Run: `bun run verify`
 
 Expected after implementation: PASS.
 
-### Task 2: Add A Reference Bun Agent Server Example
+### Task 2: Document A Reference Bun Agent Server Example
 
 **Files:**
-- Create: `examples/agent-server.ts`
 - Modify: `README.md`
 
-- [ ] **Step 1: Implement the example server**
+- [ ] **Step 1: Add the example server to README**
 
-Create an example that imports from `chatkit-bun` and `@openai/agents`, defines a support agent, subclasses `ChatKitServer`, converts stored ChatKit items with `simpleToAgentInput`, runs the agent with `{ stream: true, previousResponseId }`, streams back with `streamAgentResponse`, and exports a `Bun.serve()` factory without starting it automatically.
+Document an example that imports from `chatkit-bun` and `@openai/agents`, defines a support agent, subclasses `ChatKitServer`, converts stored ChatKit items with `simpleToAgentInput`, runs the agent with `{ stream: true, previousResponseId }`, streams back with `streamAgentResponse`, and starts a Bun server from the consuming app entrypoint.
 
 - [ ] **Step 2: Document the example**
 
@@ -47,7 +46,7 @@ Replace the placeholder README content with install, verify, private GitHub depe
 
 **Files:**
 - Verify: `package.json`
-- Verify: `examples/agent-server.ts`
+- Verify: `README.md`
 
 - [ ] **Step 1: Run typecheck**
 
