@@ -258,6 +258,7 @@ function assistantMessageAddedEvents<TContext>(
   context: AgentContext<TContext>,
   state: AssistantTextState,
   itemId: string,
+  content: AssistantMessageContent[] = [],
 ): ThreadStreamEvent[] {
   state.activeItemId = itemId;
   const events: ThreadStreamEvent[] = [];
@@ -269,7 +270,7 @@ function assistantMessageAddedEvents<TContext>(
 
   events.push({
     type: "thread.item.added",
-    item: assistantItem(context, itemId, []),
+    item: assistantItem(context, itemId, content),
   });
 
   return events;
@@ -500,7 +501,8 @@ async function convertSdkEvent<TContext>(
 
       const itemId =
         stringValue(item.id) ?? context.store.generateItemId("message", context.thread, context.context);
-      return assistantMessageAddedEvents(context, state, itemId);
+      const content = assistantContentFromItem(item, "", converter);
+      return assistantMessageAddedEvents(context, state, itemId, content);
     }
 
     case "response.content_part.added": {

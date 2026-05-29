@@ -2334,6 +2334,102 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("preserves initial assistant content on output item added events", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: {
+              type: "message",
+              id: "msg_initial",
+              content: [
+                {
+                  type: "output_text",
+                  text: "Initial text",
+                  annotations: [
+                    {
+                      type: "url_citation",
+                      url: "https://example.com/source",
+                      title: "Example Source",
+                      end_index: 12,
+                    },
+                  ],
+                },
+                { type: "refusal", refusal: "I can't help with that." },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_initial",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [
+            {
+              type: "output_text",
+              text: "Initial text",
+              annotations: [
+                {
+                  type: "annotation",
+                  source: {
+                    type: "url",
+                    url: "https://example.com/source",
+                    title: "Example Source",
+                  },
+                  index: 12,
+                },
+              ],
+            },
+            { type: "output_text", text: "I can't help with that.", annotations: [] },
+          ],
+        },
+      },
+    ]);
+  });
+
+  test("skips unsupported initial assistant content parts", async () => {
+    const events = await collect(
+      streamAgentResponse(
+        createContext(),
+        streamedRun([
+          rawResponse({
+            type: "response.output_item.added",
+            item: {
+              type: "message",
+              id: "msg_unsupported_initial",
+              content: [
+                { type: "reasoning_text", text: "private reasoning" },
+                { type: "input_text", text: "not assistant output" },
+              ],
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.added",
+        item: {
+          id: "msg_unsupported_initial",
+          thread_id: "thr_1",
+          created_at: now,
+          type: "assistant_message",
+          content: [],
+        },
+      },
+    ]);
+  });
+
   test("maps response.content_part.added output text and refusal parts", async () => {
     const events = await collect(
       streamAgentResponse(
