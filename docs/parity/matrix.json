@@ -35,7 +35,7 @@
         "sources": ["src/agents/stream.ts", "src/agents/annotations.ts"],
         "docs": ["docs/superpowers/specs/2026-05-28-chatkit-parity-foundation-design.md"]
       },
-      "notes": "Bun covers the main raw and normalized Agents stream paths, with remaining content-type gaps tracked as separate deferred rows."
+      "notes": "Bun covers the main raw and normalized Agents stream paths, with content-type limits classified in dedicated parity rows."
     },
     {
       "id": "agents-input-conversion",
@@ -50,7 +50,7 @@
         "sources": ["src/agents/converter.ts"],
         "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-input-conversion-design.md"]
       },
-      "notes": "Thread item and simple input conversion are covered, while input-side annotation replay remains deferred."
+      "notes": "Thread item and simple input conversion are covered; assistant annotation replay is classified separately for the pinned upstream contract."
     },
     {
       "id": "annotations-output-conversion",
@@ -240,32 +240,45 @@
     {
       "id": "annotations-entity-sources",
       "area": "agents-output",
-      "status": "deferred",
+      "status": "not-applicable",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
+        "files": [
+          "packages/chatkit-python/chatkit/agents.py",
+          "packages/chatkit-python/chatkit/types.py",
+          "packages/chatkit-python/docs/guides/add-annotations.md"
+        ],
         "tests": []
       },
       "bun": {
-        "tests": [],
-        "sources": [],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-annotation-hardening-design.md"]
+        "tests": ["tests/parity-smoke.test.ts"],
+        "sources": ["src/types/core.ts", "src/agents/annotations.ts"],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-annotation-hardening-design.md",
+          "docs/superpowers/specs/2026-05-29-chatkit-remaining-annotation-parity-design.md"
+        ]
       },
-      "notes": "Entity annotation source mapping is intentionally deferred until there is a concrete upstream payload contract to mirror."
+      "notes": "There is no default upstream entity citation payload for the Agents stream to mirror. Entity annotations are app-authored ChatKit thread data and remain available through the wire schema or a custom converter, so default entity source mapping is not applicable for this pinned upstream version."
     },
     {
       "id": "annotations-input-replay",
       "area": "agents-input",
-      "status": "deferred",
+      "status": "not-applicable",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
+        "files": [
+          "packages/chatkit-python/chatkit/agents.py",
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
         "tests": []
       },
       "bun": {
-        "tests": [],
-        "sources": [],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-annotation-hardening-design.md"]
+        "tests": ["tests/agents-converter.test.ts", "tests/parity-smoke.test.ts"],
+        "sources": ["src/agents/converter.ts"],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-input-conversion-design.md",
+          "docs/superpowers/specs/2026-05-29-chatkit-remaining-annotation-parity-design.md"
+        ]
       },
-      "notes": "Input-side annotation replay is not implemented because current JS Agents input shapes do not preserve assistant annotation arrays."
+      "notes": "The pinned Python converter strips assistant annotations during input replay, and Bun replays assistant text without annotations through the JavaScript Agents input shape. Full annotation replay should reopen only if upstream implements a concrete replay contract."
     },
     {
       "id": "attachments-content-conversion",
