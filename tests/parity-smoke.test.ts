@@ -239,7 +239,6 @@ describe("parity matrix", () => {
 
     expect(deferredIds).toContain("annotations-entity-sources");
     expect(deferredIds).toContain("annotations-input-replay");
-    expect(deferredIds).toContain("attachments-content-conversion");
     expect(deferredIds).toContain("non-text-assistant-content");
   });
 });

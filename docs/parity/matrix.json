@@ -270,17 +270,22 @@
     {
       "id": "attachments-content-conversion",
       "area": "agents-input",
-      "status": "deferred",
+      "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
+        "files": [
+          "packages/chatkit-python/chatkit/agents.py",
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
         "tests": []
       },
       "bun": {
-        "tests": [],
-        "sources": [],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-input-conversion-design.md"]
+        "tests": ["tests/agents-converter.test.ts", "tests/parity-smoke.test.ts"],
+        "sources": ["src/agents/converter.ts"],
+        "docs": [
+          "docs/superpowers/specs/2026-05-29-chatkit-attachments-content-conversion-design.md"
+        ]
       },
-      "notes": "Default attachment-to-message-content conversion still requires an application override."
+      "notes": "Bun matches Python's app-owned attachment conversion boundary: attachments throw by default and custom converters can map them to Agents SDK content parts."
     },
     {
       "id": "non-text-assistant-content",
