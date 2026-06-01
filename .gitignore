@@ -6,7 +6,9 @@ node_modules
 
 # output
 out
-dist
+dist/*
+!dist/**/
+!dist/**/*.d.ts
 *.tgz
 
 # code coverage

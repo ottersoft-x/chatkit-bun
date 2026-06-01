@@ -2,12 +2,12 @@
   "name": "chatkit-bun",
   "version": "0.0.2",
   "module": "./src/index.ts",
-  "types": "./src/index.ts",
+  "types": "./dist/index.d.ts",
   "type": "module",
   "private": true,
   "exports": {
     ".": {
-      "types": "./src/index.ts",
+      "types": "./dist/index.d.ts",
       "import": "./src/index.ts"
     }
   },
@@ -26,6 +26,7 @@
   },
   "scripts": {
     "test": "bun test",
+    "build:types": "bunx tsc -p tsconfig.types.json",
     "typecheck": "bunx tsc --noEmit",
     "verify": "bun run typecheck && bun test",
     "verify:parity": "bun run verify && bun scripts/verify-parity.ts"
