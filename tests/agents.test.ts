@@ -3048,6 +3048,179 @@ describe("streamAgentResponse", () => {
     ]);
   });
 
+  test("dedupes normalized and nested provider text deltas for the same SDK chunk", async () => {
+    const agentContext = createContext();
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawModel({
+            type: "output_text_delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "same",
+          }),
+          rawModel({
+            type: "model",
+            event: {
+              type: "response.output_text.delta",
+              item_id: "msg_1",
+              content_index: 0,
+              delta: "same",
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "same",
+        },
+      },
+    ]);
+  });
+
+  test("preserves repeated text deltas from the same stream channel", async () => {
+    const agentContext = createContext();
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawModel({
+            type: "output_text_delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "ha",
+          }),
+          rawModel({
+            type: "output_text_delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "ha",
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "ha",
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "ha",
+        },
+      },
+    ]);
+  });
+
+  test("preserves matching raw response text deltas after normalized text deltas", async () => {
+    const agentContext = createContext();
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawModel({
+            type: "output_text_delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "same",
+          }),
+          rawResponse({
+            type: "response.output_text.delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "same",
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "same",
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "same",
+        },
+      },
+    ]);
+  });
+
+  test("does not dedupe refusal deltas that match a normalized text delta", async () => {
+    const agentContext = createContext();
+    const events = await collect(
+      streamAgentResponse(
+        agentContext,
+        streamedRun([
+          rawModel({
+            type: "output_text_delta",
+            item_id: "msg_1",
+            content_index: 0,
+            delta: "No",
+          }),
+          rawModel({
+            type: "model",
+            event: {
+              type: "response.refusal.delta",
+              item_id: "msg_1",
+              content_index: 0,
+              delta: "No",
+            },
+          }),
+        ]),
+      ),
+    );
+
+    expect(events).toEqual([
+      {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "No",
+        },
+      },
+      {
+        type: "thread.item.updated",
+        item_id: "msg_1",
+        update: {
+          type: "assistant_message.content_part.text_delta",
+          content_index: 0,
+          delta: "No",
+        },
+      },
+    ]);
+  });
+
   test("maps reasoning summary streams into workflow thought tasks", async () => {
     const store = new TestStore();
     const agentContext = createContext(store);
