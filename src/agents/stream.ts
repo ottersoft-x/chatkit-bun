@@ -43,11 +43,26 @@ interface AssistantTextState {
   activeItemId: string | null;
   textByPart: Map<string, string>;
   annotationCountByPart: Map<string, number>;
+  lastNormalizedTextDelta: {
+    itemId: string;
+    contentIndex: number;
+    delta: string;
+  } | null;
   generatedImage: GeneratedImageState | null;
   streamingThought: StreamingThoughtState | null;
 }
 
 type StreamSource = "sdk" | "context";
+type RawResponseSource =
+  | "direct_response_event"
+  | "nested_model_event"
+  | "raw_model_stream_event"
+  | "raw_response_event";
+
+interface RawResponseData {
+  data: UnknownRecord;
+  source: RawResponseSource;
+}
 
 interface TaggedNextResult<T> {
   source: StreamSource;
@@ -108,7 +123,7 @@ function normalizeStream(streamedRun: AgentStreamInput | AsyncIterable<unknown>)
   throw new Error("streamAgentResponse requires an async iterable or an object with toStream().");
 }
 
-function rawResponseData(event: unknown): UnknownRecord | null {
+function rawResponseData(event: unknown): RawResponseData | null {
   if (!isRecord(event)) {
     return null;
   }
@@ -118,14 +133,18 @@ function rawResponseData(event: unknown): UnknownRecord | null {
     isRecord(event.data)
   ) {
     if (event.data.type === "model" && isRecord(event.data.event)) {
-      return rawResponseData(event.data.event);
+      const nested = rawResponseData(event.data.event);
+      return nested ? { data: nested.data, source: "nested_model_event" } : null;
     }
 
-    return event.data;
+    return {
+      data: event.data,
+      source: event.type === "raw_model_stream_event" ? "raw_model_stream_event" : "raw_response_event",
+    };
   }
 
   if (typeof event.type === "string" && event.type.startsWith("response.")) {
-    return event;
+    return { data: event, source: "direct_response_event" };
   }
 
   return null;
@@ -399,10 +418,18 @@ async function convertSdkEvent<TContext>(
   event: unknown,
   converter: ResponseStreamConverter,
 ): Promise<ThreadStreamEvent[]> {
-  const rawData = rawResponseData(event);
+  const rawResponse = rawResponseData(event);
 
-  if (!rawData) {
+  if (!rawResponse) {
     return [];
+  }
+
+  const { data: rawData, source } = rawResponse;
+  if (
+    rawData.type !== "output_text_delta" &&
+    !(rawData.type === "response.output_text.delta" && source === "nested_model_event")
+  ) {
+    state.lastNormalizedTextDelta = null;
   }
 
   switch (rawData.type) {
@@ -422,6 +449,7 @@ async function convertSdkEvent<TContext>(
       const delta = stringValue(rawData.delta) ?? "";
       const key = partKey(itemId, contentIndex);
       state.textByPart.set(key, `${state.textByPart.get(key) ?? ""}${delta}`);
+      state.lastNormalizedTextDelta = { itemId, contentIndex, delta };
 
       events.push({
         type: "thread.item.updated",
@@ -545,6 +573,20 @@ async function convertSdkEvent<TContext>(
       const contentIndex = numberValue(rawData.content_index) ?? 0;
       const delta = stringValue(rawData.delta) ?? "";
       const key = partKey(itemId, contentIndex);
+      const previousNormalizedDelta = state.lastNormalizedTextDelta;
+      if (
+        rawData.type === "response.output_text.delta" &&
+        source === "nested_model_event" &&
+        previousNormalizedDelta &&
+        previousNormalizedDelta.itemId === itemId &&
+        previousNormalizedDelta.contentIndex === contentIndex &&
+        previousNormalizedDelta.delta === delta
+      ) {
+        state.lastNormalizedTextDelta = null;
+        return [];
+      }
+
+      state.lastNormalizedTextDelta = null;
       state.textByPart.set(key, `${state.textByPart.get(key) ?? ""}${delta}`);
 
       return [
@@ -890,6 +932,7 @@ export async function* streamAgentResponse<TContext>(
     activeItemId: null,
     textByPart: new Map(),
     annotationCountByPart: new Map(),
+    lastNormalizedTextDelta: null,
     generatedImage: null,
     streamingThought: null,
   };
