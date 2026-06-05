@@ -1,13 +1,23 @@
 # chatkit-bun
 
-`chatkit-bun` is a Bun-native server bridge for ChatKit-style thread APIs. It includes:
+`chatkit-bun` is a Bun-native server bridge for ChatKit-style thread APIs. It is a TypeScript/Bun port derived from OpenAI's Apache-2.0 licensed `openai-chatkit` Python package.
 
 - ChatKit request processing and SSE response helpers.
 - SQLite-backed thread and item storage.
 - Widget serialization and streaming helpers.
 - `@openai/agents` stream conversion helpers for Bun servers.
 
+## Transparency
+
+This package has been developed heavily with AI assistance using [Superpowers](https://github.com/obra/superpowers), an agentic skills framework and software development methodology.
+
 ## Development
+
+Install in a Bun app:
+
+```bash
+bun add chatkit-bun
+```
 
 Install dependencies:
 
@@ -21,18 +31,7 @@ Run typecheck and tests:
 bun run verify
 ```
 
-The package is source-distributed for Bun apps. Its package entrypoint is `src/index.ts`, so a private Git install does not need a build step or committed `dist` output.
-
-Install from a private GitHub URL in a Bun app:
-
-```json
-{
-  "dependencies": {
-    "@openai/agents": "^0.11.6",
-    "chatkit-bun": "git+ssh://git@github.com/ottersoft-x/chatkit-bun.git#main"
-  }
-}
-```
+The package is source-distributed for Bun apps. Its package entrypoint is `src/index.ts`, with TypeScript declarations emitted under `types`.
 
 ## Bun Agent Server Example
 
