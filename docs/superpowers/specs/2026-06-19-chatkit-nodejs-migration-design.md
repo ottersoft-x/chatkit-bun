@@ -53,7 +53,10 @@ Out of scope:
 - `types`: `./dist/index.d.ts`
 - `exports["."]`: types and import targets under `dist`
 - `files`: `dist`, `README.md`, `LICENSE`, and `NOTICE`
-- `packageManager`: npm
+- `packageManager`: an exact npm version, such as `npm@11.13.0` when generated
+  by the local Node 24 toolchain
+- repository, homepage, bugs, and keywords updated away from `chatkit-bun` and
+  Bun-specific branding
 
 The package should not expose `src/*.ts` as runtime entrypoints. TypeScript
 source remains under `src/`; published runtime code and type declarations come
@@ -61,6 +64,14 @@ from `dist/`.
 
 `bun.lock` should be removed and replaced by `package-lock.json`. CI should use
 `npm ci` so dependency installs are strictly tied to the committed lockfile.
+
+Package dependencies should reflect a compiled Node library:
+
+- add `@types/node` as a development dependency
+- keep `typescript` as a development dependency
+- remove the TypeScript peer dependency unless emitted declarations prove that
+  consumers need to bring their own TypeScript package at runtime or install time
+- remove `@types/bun` and all Bun engine metadata
 
 ## TypeScript And Module Design
 
@@ -110,8 +121,23 @@ That maps directly to Node's built-in SQLite API. The public class should remain
 `node:fs/promises` file reading plus `JSON.parse`, while preserving the current
 path resolution behavior.
 
+The path resolver needs explicit compiled-package coverage. The current
+implementation infers caller-relative paths from stack frames and skips its own
+source file. After publishing compiled `dist` files, that same behavior must
+skip both source and compiled internal template frames, then resolve
+`WidgetTemplate.fromFile("relative.widget")` against the consumer file's
+directory. Add a Node ESM smoke test that imports the compiled package and loads
+a relative `.widget` fixture from a consumer module.
+
 Example code should use Node APIs. The README server example should replace
 `Bun.serve` and `Bun.env` with a Node `node:http` example and `process.env`.
+
+`node:sqlite` has a less application-specific TypeScript surface than
+`bun:sqlite`'s typed `query<T, Args>` calls. Keep SQLite row typing contained in
+`src/sqlite-store.ts` with a small local helper or parser boundary for expected
+row shapes instead of scattering unchecked casts through the store. Store tests
+should continue covering `:memory:`, foreign-key behavior, close behavior,
+pagination, and parsed row shapes.
 
 ## Tests And Verification
 
@@ -122,21 +148,33 @@ Tests should migrate from `bun:test` to Node's built-in test runner:
 - use Node filesystem APIs for fixtures
 - use Node-compatible temporary paths and cleanup
 
+Tests should not run directly from raw TypeScript source. Node's built-in
+TypeScript stripping does not apply project `tsconfig` settings and should not
+be the canonical test path for this library. Instead, define a dedicated test
+compile step that emits source, tests, and test-only helpers to a temporary
+JavaScript output directory, then run `node --test` against that compiled test
+output.
+
 Expected npm scripts:
 
-- `test`: `node --test`
+- `build:test`: `tsc -p tsconfig.test.json`
+- `test`: `npm run build:test && node --test .tmp/test/tests`
 - `build`: `tsc -p tsconfig.build.json`
 - `typecheck`: `tsc --noEmit`
 - `verify`: `npm run typecheck && npm test && npm run build`
-- `verify:parity`: `npm run verify` plus the Node-compatible parity summary
-  script
+- `verify:parity`: `npm run verify` plus a Node-compatible parity summary
+  script compiled as part of the test or script build
 
 The migration should add or update package tests to assert:
 
 - package name is `chatkit-nodejs`
 - package exports point at `dist`
 - package engine requires Node `>=24.15.0`
+- package manager is an exact npm package-manager value
 - no Bun package manager, Bun engine, or `@types/bun` metadata remains
+- TypeScript is not a peer dependency unless there is a documented emitted-type
+  requirement
+- repository, homepage, bugs, and keywords use `chatkit-nodejs` or Node wording
 - packed contents do not include source-only or Bun lock artifacts
 
 Full verification for the implementation should include `npm run verify`,
@@ -157,6 +195,18 @@ Update:
 - active parity docs that instruct contributors how to sync and verify the
   project
 - package metadata and package tests
+
+Active parity metadata should be migrated as part of the clean rebrand. The
+current matrix uses a `bun` implementation key, and active docs use Bun wording.
+Rename active implementation metadata to `nodejs` rather than leaving Bun as a
+schema name:
+
+- `docs/parity/matrix.json` rows use `nodejs` for local tests, sources, and docs
+- parity smoke tests validate `nodejs` references
+- `docs/parity/sync.md` describes Node/npm verification
+- `scripts/verify-parity.ts` output names the Node.js implementation
+- active docs referenced by parity rows avoid Bun wording unless they are
+  historical references
 
 Historical Superpowers specs and plans can remain as history unless active
 parity metadata or tests rely on their names. New specs and plans should use
@@ -198,6 +248,10 @@ be clear in package metadata, docs, tests, and examples.
 - `npm pack --dry-run` shows only intended publish artifacts.
 - Importing `chatkit-nodejs` from the packed package works in a Node ESM smoke
   test.
+- A compiled-package smoke test proves `WidgetTemplate.fromFile(...)` resolves a
+  caller-relative `.widget` path from a consumer module.
+- Active parity metadata uses `nodejs`, not `bun`, for local implementation
+  references.
 - Repository search finds no active Bun runtime, toolchain, package, or docs
   references except historical specs/plans and any explicit migration notes.
 - README examples run on Node APIs and import from `chatkit-nodejs`.
