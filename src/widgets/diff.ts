@@ -1,6 +1,6 @@
-import type { ThreadItemUpdate } from "../types/server";
-import { serializeWidget } from "./serialization";
-import type { WidgetRoot } from "./types";
+import type { ThreadItemUpdate } from "../types/server.js";
+import { serializeWidget } from "./serialization.js";
+import type { WidgetRoot } from "./types.js";
 
 type WidgetNode = Record<string, unknown>;
 type WidgetDiffUpdate = Extract<

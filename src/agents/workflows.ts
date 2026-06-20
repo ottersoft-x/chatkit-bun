@@ -5,9 +5,9 @@ import {
   type ThreadItem,
   type Workflow,
   type WorkflowSummary,
-} from "../types/core";
-import type { ThreadStreamEvent } from "../types/server";
-import type { AgentContext } from "./context";
+} from "../types/core.js";
+import type { ThreadStreamEvent } from "../types/server.js";
+import type { AgentContext } from "./context.js";
 
 export type WorkflowItem = Extract<ThreadItem, { type: "workflow" }>;
 export type ThoughtTask = Extract<WorkflowItem["workflow"]["tasks"][number], { type: "thought" }>;

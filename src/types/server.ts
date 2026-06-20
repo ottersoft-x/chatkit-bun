@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { ActionConfigSchema } from "../actions";
+import { ActionConfigSchema } from "../actions.js";
 import {
   AnnotationSchema,
   AssistantMessageContentSchema,
@@ -11,7 +11,7 @@ import {
   ThreadItemSchema,
   ThreadMetadataSchema,
   UserMessageContentSchema,
-} from "./core";
+} from "./core.js";
 
 export const DEFAULT_PAGE_SIZE = 20;
 

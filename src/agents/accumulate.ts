@@ -1,4 +1,4 @@
-import type { MarkdownWidget, TextWidget } from "../widgets";
+import type { MarkdownWidget, TextWidget } from "../widgets/index.js";
 
 type AccumulatableTextWidget = TextWidget | MarkdownWidget;
 type UnknownRecord = Record<string, unknown>;

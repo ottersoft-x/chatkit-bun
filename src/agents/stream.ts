@@ -4,12 +4,12 @@ import {
   ToolInputGuardrailTripwireTriggered,
   ToolOutputGuardrailTripwireTriggered,
 } from "@openai/agents";
-import type { AssistantMessageContent, ThreadItem } from "../types/core";
-import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
-import { convertTextContentPart, defaultResponseStreamConverter } from "./annotations";
-import type { ResponseStreamConverter } from "./annotations";
-import type { AgentContext } from "./context";
-import type { AgentStreamInput, StreamAgentResponseOptions, ToolCallMetadata } from "./types";
+import type { AssistantMessageContent, ThreadItem } from "../types/core.js";
+import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server.js";
+import { convertTextContentPart, defaultResponseStreamConverter } from "./annotations.js";
+import type { ResponseStreamConverter } from "./annotations.js";
+import type { AgentContext } from "./context.js";
+import type { AgentStreamInput, StreamAgentResponseOptions, ToolCallMetadata } from "./types.js";
 import {
   appendWorkflowTask,
   createReasoningWorkflowItem,
@@ -22,7 +22,7 @@ import {
   type ThoughtTask,
   updateWorkflowTaskEvent,
   workflowAddedEvent,
-} from "./workflows";
+} from "./workflows.js";
 
 type UnknownRecord = Record<string, unknown>;
 

@@ -1,8 +1,8 @@
-export { ResponseStreamConverter, defaultResponseStreamConverter } from "./annotations";
-export type { ResponseStreamConverterOptions } from "./annotations";
-export { accumulateText } from "./accumulate";
-export type { AccumulatableTextWidget } from "./accumulate";
-export { ThreadItemConverter, simpleToAgentInput } from "./converter";
+export { ResponseStreamConverter, defaultResponseStreamConverter } from "./annotations.js";
+export type { ResponseStreamConverterOptions } from "./annotations.js";
+export { accumulateText } from "./accumulate.js";
+export type { AccumulatableTextWidget } from "./accumulate.js";
+export { ThreadItemConverter, simpleToAgentInput } from "./converter.js";
 export type {
   AgentMessageContentPart,
   AgentUserMessageItem,
@@ -19,7 +19,7 @@ export type {
   UserMessageTagContent,
   WidgetItem,
   WorkflowItem,
-} from "./converter";
-export { AgentContext, ClientToolCall } from "./context";
-export { streamAgentResponse } from "./stream";
-export type { AgentContextOptions, AgentStreamInput, StreamAgentResponseOptions } from "./types";
+} from "./converter.js";
+export { AgentContext, ClientToolCall } from "./context.js";
+export { streamAgentResponse } from "./stream.js";
+export type { AgentContextOptions, AgentStreamInput, StreamAgentResponseOptions } from "./types.js";

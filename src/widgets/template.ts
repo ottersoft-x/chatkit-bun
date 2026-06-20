@@ -1,14 +1,15 @@
+import { readFile } from "node:fs/promises";
 import { dirname, isAbsolute, join } from "node:path";
 
 import nunjucks from "nunjucks";
 
-import { serializeWidget } from "./serialization";
+import { serializeWidget } from "./serialization.js";
 import {
   BasicRootSchema,
   DynamicWidgetRootSchema,
   type BasicRoot,
   type DynamicWidgetRoot,
-} from "./types";
+} from "./types.js";
 
 const env = new nunjucks.Environment(undefined, {
   autoescape: false,
@@ -51,7 +52,11 @@ function callerDirectory(): string | null {
     if (matchedPath == null) continue;
 
     const path = decodeURI(matchedPath.replace(/^file:\/\//, ""));
-    if (!path.includes("/src/widgets/template.")) {
+    const normalizedPath = path.replaceAll("\\", "/");
+    if (
+      !normalizedPath.includes("/src/widgets/template.") &&
+      !normalizedPath.includes("/dist/widgets/template.")
+    ) {
       return dirname(path);
     }
   }
@@ -160,8 +165,9 @@ export class WidgetTemplate {
   }
 
   static async fromFile(path: string): Promise<WidgetTemplate> {
-    const definition = await Bun.file(resolveWidgetPath(path)).json();
-    return new WidgetTemplate(definition as WidgetTemplateDefinition);
+    const source = await readFile(resolveWidgetPath(path), "utf8");
+    const definition = JSON.parse(source) as WidgetTemplateDefinition;
+    return new WidgetTemplate(definition);
   }
 
   build(data?: unknown): DynamicWidgetRoot {
