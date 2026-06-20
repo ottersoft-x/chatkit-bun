@@ -33,7 +33,7 @@ type ParityRow = {
   area?: unknown;
   status?: unknown;
   upstream?: unknown;
-  bun?: {
+  nodejs?: {
     tests?: string[];
     sources?: string[];
     docs?: string[];
@@ -228,13 +228,13 @@ describe("parity matrix", () => {
       expect(validStatuses.has(row.status), `${row.id} has unknown status ${row.status}`).toBe(true);
 
       expect(row.upstream, `${row.id} upstream reference`).toBeTruthy();
-      expect(row.bun, `${row.id} Bun reference`).toBeTruthy();
+      expect(row.nodejs, `${row.id} Node.js reference`).toBeTruthy();
       expectString(row.notes, `${row.id} notes`);
 
       const localReferences = [
-        ...(row.bun?.tests ?? []),
-        ...(row.bun?.sources ?? []),
-        ...(row.bun?.docs ?? []),
+        ...(row.nodejs?.tests ?? []),
+        ...(row.nodejs?.sources ?? []),
+        ...(row.nodejs?.docs ?? []),
       ];
       if (row.status !== "deferred" && row.status !== "not-applicable") {
         expect(localReferences.length, `${row.id} should cite local coverage`).toBeGreaterThan(0);

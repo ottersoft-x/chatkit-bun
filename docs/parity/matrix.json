@@ -12,210 +12,364 @@
       "area": "metadata",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/pyproject.toml"],
+        "files": [
+          "packages/chatkit-python/pyproject.toml"
+        ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/parity-smoke.test.ts"],
+      "notes": "The pinned Python package name, version, submodule path, and commit are recorded and cross-checked against the parity matrix.",
+      "nodejs": {
+        "tests": [
+          "tests/parity-smoke.test.ts"
+        ],
         "sources": [],
-        "docs": ["docs/parity/upstream.json"]
-      },
-      "notes": "The pinned Python package name, version, submodule path, and commit are recorded and cross-checked against the parity matrix."
+        "docs": [
+          "docs/parity/upstream.json"
+        ]
+      }
     },
     {
       "id": "agents-output-streaming",
       "area": "agents-output",
       "status": "partial",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_event_mapping", "test_stream_agent_response_assistant_message_content_types"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_event_mapping",
+          "test_stream_agent_response_assistant_message_content_types"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts", "tests/parity-smoke.test.ts"],
-        "sources": ["src/agents/stream.ts", "src/agents/annotations.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-parity-foundation-design.md"]
-      },
-      "notes": "Bun covers the main raw and normalized Agents stream paths, with content-type limits classified in dedicated parity rows."
+      "notes": "Node.js covers the main raw and normalized Agents stream paths, with content-type limits classified in dedicated parity rows.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/agents/stream.ts",
+          "src/agents/annotations.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-parity-foundation-design.md"
+        ]
+      }
     },
     {
       "id": "agents-input-conversion",
       "area": "agents-input",
       "status": "partial",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_thread_item_converter", "test_simple_to_agent_input"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_thread_item_converter",
+          "test_simple_to_agent_input"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents-converter.test.ts"],
-        "sources": ["src/agents/converter.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-input-conversion-design.md"]
-      },
-      "notes": "Thread item and simple input conversion are covered; assistant annotation replay is classified separately for the pinned upstream contract."
+      "notes": "Thread item and simple input conversion are covered; assistant annotation replay is classified separately for the pinned upstream contract.",
+      "nodejs": {
+        "tests": [
+          "tests/agents-converter.test.ts"
+        ],
+        "sources": [
+          "src/agents/converter.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-input-conversion-design.md"
+        ]
+      }
     },
     {
       "id": "annotations-output-conversion",
       "area": "agents-output",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_event_mapping"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_event_mapping"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts", "tests/server.test.ts", "tests/parity-smoke.test.ts"],
-        "sources": ["src/agents/annotations.ts", "src/server.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-annotation-hardening-design.md"]
-      },
-      "notes": "File, container file, and URL citation conversion plus server-side annotation merge behavior are covered locally."
+      "notes": "File, container file, and URL citation conversion plus server-side annotation merge behavior are covered locally.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts",
+          "tests/server.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/agents/annotations.ts",
+          "src/server.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-annotation-hardening-design.md"
+        ]
+      }
     },
     {
       "id": "agents-workflows",
       "area": "agents-output",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_reasoning_workflow", "test_custom_workflow"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_reasoning_workflow",
+          "test_custom_workflow"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts", "tests/server.test.ts"],
-        "sources": ["src/agents/context.ts", "src/agents/workflows.ts", "src/agents/stream.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-reasoning-workflows-design.md"]
-      },
-      "notes": "Reasoning and custom workflow streaming, persistence, and resume behavior are covered by focused Bun suites."
+      "notes": "Reasoning and custom workflow streaming, persistence, and resume behavior are covered by focused Node.js suites.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts",
+          "tests/server.test.ts"
+        ],
+        "sources": [
+          "src/agents/context.ts",
+          "src/agents/workflows.ts",
+          "src/agents/stream.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-reasoning-workflows-design.md"
+        ]
+      }
     },
     {
       "id": "agents-generated-images",
       "area": "agents-output",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_image_generation_events"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_image_generation_events"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts", "tests/server.test.ts"],
-        "sources": ["src/agents/annotations.ts", "src/agents/stream.ts", "src/server.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-generated-images-design.md"]
-      },
-      "notes": "Generated image added, partial update, final update, and server merge behavior are covered."
+      "notes": "Generated image added, partial update, final update, and server merge behavior are covered.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts",
+          "tests/server.test.ts"
+        ],
+        "sources": [
+          "src/agents/annotations.ts",
+          "src/agents/stream.ts",
+          "src/server.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-generated-images-design.md"
+        ]
+      }
     },
     {
       "id": "agents-guardrail-rollback",
       "area": "agents-output",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_guardrail_tripwire"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_guardrail_tripwire"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts"],
-        "sources": ["src/agents/stream.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-guardrail-rollback-design.md"]
-      },
-      "notes": "Input, output, tool input, and tool output guardrail rollback paths are covered for produced SDK and context items."
+      "notes": "Input, output, tool input, and tool output guardrail rollback paths are covered for produced SDK and context items.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts"
+        ],
+        "sources": [
+          "src/agents/stream.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-guardrail-rollback-design.md"
+        ]
+      }
     },
     {
       "id": "agents-client-tool-deferral",
       "area": "agents-output",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_client_tool_call"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_client_tool_call"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts", "tests/server.test.ts"],
-        "sources": ["src/agents/context.ts", "src/agents/stream.ts", "src/server.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-27-chatkit-agents-core-slice-design.md"]
-      },
-      "notes": "Client tool call deferral, metadata retention, pending call cleanup, and resume paths are covered."
+      "notes": "Client tool call deferral, metadata retention, pending call cleanup, and resume paths are covered.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts",
+          "tests/server.test.ts"
+        ],
+        "sources": [
+          "src/agents/context.ts",
+          "src/agents/stream.ts",
+          "src/server.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-27-chatkit-agents-core-slice-design.md"
+        ]
+      }
     },
     {
       "id": "agents-context-events",
       "area": "agents-output",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_event_mapping"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_event_mapping"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts"],
-        "sources": ["src/agents/context.ts", "src/agents/stream.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-parity-foundation-design.md"]
-      },
-      "notes": "AgentContext queues application-injected events and streamAgentResponse yields them in stream order alongside SDK events."
+      "notes": "AgentContext queues application-injected events and streamAgentResponse yields them in stream order alongside SDK events.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts"
+        ],
+        "sources": [
+          "src/agents/context.ts",
+          "src/agents/stream.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-parity-foundation-design.md"
+        ]
+      }
     },
     {
       "id": "server-processing",
       "area": "server",
       "status": "partial",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_chatkit_server.py"],
+        "files": [
+          "packages/chatkit-python/tests/test_chatkit_server.py"
+        ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/server.test.ts", "tests/http.test.ts"],
-        "sources": ["src/server.ts", "src/http.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-27-chatkit-server-parity-slice-design.md"]
-      },
-      "notes": "Core request processing, persistence, cancellation, retry, actions, transcription, and HTTP streaming are covered; some broader Python server surfaces remain future parity rows."
+      "notes": "Core request processing, persistence, cancellation, retry, actions, transcription, and HTTP streaming are covered; some broader Python server surfaces remain future parity rows.",
+      "nodejs": {
+        "tests": [
+          "tests/server.test.ts",
+          "tests/http.test.ts"
+        ],
+        "sources": [
+          "src/server.ts",
+          "src/http.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-27-chatkit-server-parity-slice-design.md"
+        ]
+      }
     },
     {
       "id": "widgets-fixtures",
       "area": "widgets",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_widgets.py"],
+        "files": [
+          "packages/chatkit-python/tests/test_widgets.py"
+        ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/widgets.test.ts"],
-        "sources": ["src/widgets/template.ts", "src/widgets/components.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-27-chatkit-widget-parity-design.md"]
-      },
-      "notes": "Copied upstream widget fixtures and local widget rendering/diff behavior are covered by golden fixture tests."
+      "notes": "Copied upstream widget fixtures and local widget rendering/diff behavior are covered by golden fixture tests.",
+      "nodejs": {
+        "tests": [
+          "tests/widgets.test.ts"
+        ],
+        "sources": [
+          "src/widgets/template.ts",
+          "src/widgets/components.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-27-chatkit-widget-parity-design.md"
+        ]
+      }
     },
     {
       "id": "chatkit-wire-schemas",
       "area": "types",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_types.py"],
+        "files": [
+          "packages/chatkit-python/tests/test_types.py"
+        ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/types.test.ts", "tests/server-types.test.ts", "tests/parity-smoke.test.ts"],
-        "sources": ["src/types/core.ts", "src/types/server.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-26-chatkit-bun-port-design.md"]
-      },
-      "notes": "Core thread item schemas and stream event wire names used by ChatKit clients are validated locally."
+      "notes": "Core thread item schemas and stream event wire names used by ChatKit clients are validated locally.",
+      "nodejs": {
+        "tests": [
+          "tests/types.test.ts",
+          "tests/server-types.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/types/core.ts",
+          "src/types/server.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-06-19-chatkit-nodejs-migration-design.md"
+        ]
+      }
     },
     {
       "id": "http-sse-boundary",
       "area": "http",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_chatkit_server.py"],
+        "files": [
+          "packages/chatkit-python/tests/test_chatkit_server.py"
+        ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/http.test.ts", "tests/parity-smoke.test.ts"],
-        "sources": ["src/http.ts", "src/server.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-27-chatkit-bun-http-handler-design.md"]
-      },
-      "notes": "The HTTP handler returns JSON or text/event-stream responses and preserves streaming chunks for ChatKit clients."
+      "notes": "The HTTP handler returns JSON or text/event-stream responses and preserves streaming chunks for ChatKit clients.",
+      "nodejs": {
+        "tests": [
+          "tests/http.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/http.ts",
+          "src/server.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-06-19-chatkit-nodejs-migration-design.md"
+        ]
+      }
     },
     {
       "id": "agents-accumulate-text",
       "area": "agents-output",
       "status": "covered",
       "upstream": {
-        "files": ["packages/chatkit-python/tests/test_agents.py"],
-        "tests": ["test_accumulate_text"]
+        "files": [
+          "packages/chatkit-python/tests/test_agents.py"
+        ],
+        "tests": [
+          "test_accumulate_text"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents-accumulate.test.ts"],
-        "sources": ["src/agents/accumulate.ts"],
-        "docs": ["docs/superpowers/specs/2026-05-28-chatkit-agents-accumulate-text-design.md"]
-      },
-      "notes": "Bun exports accumulateText for strict raw response output text delta parity and covers composition with widget streaming roots."
+      "notes": "Node.js exports accumulateText for strict raw response output text delta parity and covers composition with widget streaming roots.",
+      "nodejs": {
+        "tests": [
+          "tests/agents-accumulate.test.ts"
+        ],
+        "sources": [
+          "src/agents/accumulate.ts"
+        ],
+        "docs": [
+          "docs/superpowers/specs/2026-05-28-chatkit-agents-accumulate-text-design.md"
+        ]
+      }
     },
     {
       "id": "agents-previous-response-id",
@@ -228,14 +382,20 @@
         ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts", "tests/parity-smoke.test.ts"],
-        "sources": ["src/agents/context.ts", "src/agents/types.ts"],
+      "notes": "Node.js AgentContext stores previousResponseId state for OpenAI Responses API chaining while leaving persistence and run options application-owned.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/agents/context.ts",
+          "src/agents/types.ts"
+        ],
         "docs": [
           "docs/superpowers/specs/2026-05-29-chatkit-agents-previous-response-id-design.md"
         ]
-      },
-      "notes": "Bun AgentContext stores previousResponseId state for OpenAI Responses API chaining while leaving persistence and run options application-owned."
+      }
     },
     {
       "id": "annotations-entity-sources",
@@ -249,15 +409,20 @@
         ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/parity-smoke.test.ts"],
-        "sources": ["src/types/core.ts", "src/agents/annotations.ts"],
+      "notes": "There is no default upstream entity citation payload for the Agents stream to mirror. Entity annotations are app-authored ChatKit thread data and remain available through the wire schema or a custom converter, so default entity source mapping is not applicable for this pinned upstream version.",
+      "nodejs": {
+        "tests": [
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/types/core.ts",
+          "src/agents/annotations.ts"
+        ],
         "docs": [
           "docs/superpowers/specs/2026-05-28-chatkit-agents-annotation-hardening-design.md",
           "docs/superpowers/specs/2026-05-29-chatkit-remaining-annotation-parity-design.md"
         ]
-      },
-      "notes": "There is no default upstream entity citation payload for the Agents stream to mirror. Entity annotations are app-authored ChatKit thread data and remain available through the wire schema or a custom converter, so default entity source mapping is not applicable for this pinned upstream version."
+      }
     },
     {
       "id": "annotations-input-replay",
@@ -270,15 +435,20 @@
         ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/agents-converter.test.ts", "tests/parity-smoke.test.ts"],
-        "sources": ["src/agents/converter.ts"],
+      "notes": "The pinned Python converter strips assistant annotations during input replay, and Node.js replays assistant text without annotations through the JavaScript Agents input shape. Full annotation replay should reopen only if upstream implements a concrete replay contract.",
+      "nodejs": {
+        "tests": [
+          "tests/agents-converter.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/agents/converter.ts"
+        ],
         "docs": [
           "docs/superpowers/specs/2026-05-28-chatkit-agents-input-conversion-design.md",
           "docs/superpowers/specs/2026-05-29-chatkit-remaining-annotation-parity-design.md"
         ]
-      },
-      "notes": "The pinned Python converter strips assistant annotations during input replay, and Bun replays assistant text without annotations through the JavaScript Agents input shape. Full annotation replay should reopen only if upstream implements a concrete replay contract."
+      }
     },
     {
       "id": "attachments-content-conversion",
@@ -291,14 +461,19 @@
         ],
         "tests": []
       },
-      "bun": {
-        "tests": ["tests/agents-converter.test.ts", "tests/parity-smoke.test.ts"],
-        "sources": ["src/agents/converter.ts"],
+      "notes": "Node.js matches Python's app-owned attachment conversion boundary: attachments throw by default and custom converters can map them to Agents SDK content parts.",
+      "nodejs": {
+        "tests": [
+          "tests/agents-converter.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
+        "sources": [
+          "src/agents/converter.ts"
+        ],
         "docs": [
           "docs/superpowers/specs/2026-05-29-chatkit-attachments-content-conversion-design.md"
         ]
-      },
-      "notes": "Bun matches Python's app-owned attachment conversion boundary: attachments throw by default and custom converters can map them to Agents SDK content parts."
+      }
     },
     {
       "id": "non-text-assistant-content",
@@ -309,10 +484,17 @@
           "packages/chatkit-python/chatkit/agents.py",
           "packages/chatkit-python/tests/test_agents.py"
         ],
-        "tests": ["test_stream_agent_response_assistant_message_content_types"]
+        "tests": [
+          "test_stream_agent_response_assistant_message_content_types"
+        ]
       },
-      "bun": {
-        "tests": ["tests/agents.test.ts", "tests/server.test.ts", "tests/parity-smoke.test.ts"],
+      "notes": "The pinned assistant-message content contract only exposes output text and refusal content, both covered locally. Generated images are represented as separate generated_image thread items, so there is no additional non-text assistant-message content part to implement for this upstream version.",
+      "nodejs": {
+        "tests": [
+          "tests/agents.test.ts",
+          "tests/server.test.ts",
+          "tests/parity-smoke.test.ts"
+        ],
         "sources": [
           "src/types/core.ts",
           "src/types/server.ts",
@@ -324,8 +506,7 @@
           "docs/superpowers/specs/2026-05-28-chatkit-agents-generated-images-design.md",
           "docs/superpowers/specs/2026-05-29-chatkit-non-text-assistant-content-design.md"
         ]
-      },
-      "notes": "The pinned assistant-message content contract only exposes output text and refusal content, both covered locally. Generated images are represented as separate generated_image thread items, so there is no additional non-text assistant-message content part to implement for this upstream version."
+      }
     }
   ]
 }
