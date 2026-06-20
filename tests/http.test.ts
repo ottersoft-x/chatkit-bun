@@ -1,10 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import { createChatKitHandler } from "../src/http";
-import { ChatKitServer, NonStreamingResult, StreamingResult } from "../src/server";
-import { BaseStore, type StoreItemType } from "../src/store";
-import type { Attachment, Page, ThreadItem, ThreadMetadata } from "../src/types/core";
-import type { ThreadStreamEvent } from "../src/types/server";
+import { expect } from "./helpers/expect.js";
+
+import { createChatKitHandler } from "../src/http.js";
+import { ChatKitServer, NonStreamingResult, StreamingResult } from "../src/server.js";
+import { BaseStore, type StoreItemType } from "../src/store.js";
+import type { Attachment, Page, ThreadItem, ThreadMetadata } from "../src/types/core.js";
+import type { ThreadStreamEvent } from "../src/types/server.js";
 
 interface RequestContext {
   userId: string;

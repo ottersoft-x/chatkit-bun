@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
+
+import { expect } from "./helpers/expect.js";
 import { z } from "zod";
 
 import {
@@ -8,7 +10,7 @@ import {
   ThreadItemSchema,
   ThreadMetadataSchema,
   UserMessageContentSchema,
-} from "../src/types/core";
+} from "../src/types/core.js";
 
 describe("core schemas", () => {
   test("parses paginated data", () => {

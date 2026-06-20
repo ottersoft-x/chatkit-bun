@@ -1,11 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
+
+import { expect } from "./helpers/expect.js";
 
 import {
   ChatKitRequestSchema,
   SyncCustomActionResponseSchema,
   ThreadStreamEventSchema,
   isStreamingRequest,
-} from "../src/types/server";
+} from "../src/types/server.js";
 
 describe("server request schemas", () => {
   test("classifies streaming and non-streaming request types", () => {

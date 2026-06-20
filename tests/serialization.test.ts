@@ -1,13 +1,15 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import { NotFoundError, UnsupportedOperationError, ValidationError } from "../src/errors";
+import { expect } from "./helpers/expect.js";
+
+import { NotFoundError, UnsupportedOperationError, ValidationError } from "../src/errors.js";
 import {
   decodeJsonBytes,
   encodeJsonBytes,
   omitUndefinedDeep,
   parseDate,
   serializeDate,
-} from "../src/serialization";
+} from "../src/serialization.js";
 
 describe("serialization helpers", () => {
   test("encodes and decodes JSON bytes", () => {

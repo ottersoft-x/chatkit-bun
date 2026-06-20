@@ -56,7 +56,7 @@
     "build:test": "tsc -p tsconfig.test.json",
     "build:scripts": "tsc -p tsconfig.scripts.json",
     "build:package-test": "tsc -p tsconfig.package-test.json",
-    "test": "npm run build:test && node --test .tmp/test/tests",
+    "test": "npm run build:test && node -e \"import('node:fs/promises').then(fs => fs.cp('tests/assets', '.tmp/test/tests/assets', { recursive: true, force: true }))\" && node --test .tmp/test/tests/*.test.js",
     "test:package": "npm run build && npm run build:package-test && node --test .tmp/package-test/tests/package-smoke",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm run build && npm run build:scripts && node .tmp/scripts/scripts/check-package.js",

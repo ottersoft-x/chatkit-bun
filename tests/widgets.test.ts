@@ -1,4 +1,7 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
+import { access, readFile } from "node:fs/promises";
+
+import { expect } from "./helpers/expect.js";
 
 import {
   Badge,
@@ -34,7 +37,7 @@ import {
   Chart,
   WidgetTemplate,
   type DynamicWidgetRoot,
-} from "../src/widgets";
+} from "../src/widgets/index.js";
 
 const widgetFixtures = [
   "card_no_data",
@@ -44,11 +47,24 @@ const widgetFixtures = [
   "basic_root",
 ] as const;
 
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readJsonFixture<T>(path: string): Promise<T> {
+  return JSON.parse(await readFile(path, "utf8")) as T;
+}
+
 describe("widgets", () => {
   test("has copied upstream widget fixtures", async () => {
     for (const name of widgetFixtures) {
-      expect(await Bun.file(`tests/assets/widgets/${name}.widget`).exists()).toBe(true);
-      expect(await Bun.file(`tests/assets/widgets/${name}.json`).exists()).toBe(true);
+      expect(await fileExists(`tests/assets/widgets/${name}.widget`)).toBe(true);
+      expect(await fileExists(`tests/assets/widgets/${name}.json`)).toBe(true);
     }
   });
 
@@ -205,7 +221,7 @@ describe("widgets", () => {
   for (const [name, data] of Object.entries(fixtureData)) {
     test(`renders ${name}.widget`, async () => {
       const template = await WidgetTemplate.fromFile(`assets/widgets/${name}.widget`);
-      const expected = await Bun.file(`tests/assets/widgets/${name}.json`).json();
+      const expected = await readJsonFixture(`tests/assets/widgets/${name}.json`);
 
       expect(template.build(data)).toEqual(expected);
     });
@@ -217,7 +233,7 @@ describe("widgets", () => {
 
   test("builds Basic roots through buildBasic", async () => {
     const template = await WidgetTemplate.fromFile("assets/widgets/basic_root.widget");
-    const expected = await Bun.file("tests/assets/widgets/basic_root.json").json();
+    const expected = await readJsonFixture("tests/assets/widgets/basic_root.json");
 
     const widget = template.buildBasic({
       name: "Harry Potter",
