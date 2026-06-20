@@ -1,4 +1,4 @@
-import { DynamicWidgetRootSchema, type WidgetJson, type WidgetRoot } from "./types";
+import { DynamicWidgetRootSchema, type WidgetJson, type WidgetRoot } from "./types.js";
 
 function omitUndefinedDeep(value: unknown): WidgetJson {
   if (Array.isArray(value)) {

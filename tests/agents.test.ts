@@ -4,12 +4,14 @@ import {
   ToolInputGuardrailTripwireTriggered,
   ToolOutputGuardrailTripwireTriggered,
 } from "@openai/agents";
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import { AgentContext, ClientToolCall, streamAgentResponse } from "../src/agents";
-import { ResponseStreamConverter, defaultResponseStreamConverter } from "../src/agents/annotations";
-import { SQLiteStore } from "../src/sqlite-store";
-import { BaseStore, type Store, type StoreItemType } from "../src/store";
+import { expect } from "./helpers/expect.js";
+
+import { AgentContext, ClientToolCall, streamAgentResponse } from "../src/agents/index.js";
+import { ResponseStreamConverter, defaultResponseStreamConverter } from "../src/agents/annotations.js";
+import { SQLiteStore } from "../src/sqlite-store.js";
+import { BaseStore, type Store, type StoreItemType } from "../src/store.js";
 import type {
   Annotation,
   Attachment,
@@ -17,9 +19,9 @@ import type {
   ThreadItem,
   ThreadMetadata,
   WorkflowSummary,
-} from "../src/types/core";
-import type { ThreadStreamEvent } from "../src/types/server";
-import { Card, Text } from "../src/widgets";
+} from "../src/types/core.js";
+import type { ThreadStreamEvent } from "../src/types/server.js";
+import { Card, Text } from "../src/widgets/index.js";
 
 interface RequestContext {
   userId: string;

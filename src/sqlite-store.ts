@@ -1,7 +1,7 @@
-import { Database } from "bun:sqlite";
+import { DatabaseSync } from "node:sqlite";
 
-import { NotFoundError } from "./errors";
-import { BaseStore } from "./store";
+import { NotFoundError } from "./errors.js";
+import { BaseStore } from "./store.js";
 import {
   AttachmentSchema,
   ThreadItemSchema,
@@ -10,7 +10,7 @@ import {
   type Page,
   type ThreadItem,
   type ThreadMetadata,
-} from "./types/core";
+} from "./types/core.js";
 
 export interface SQLiteStoreOptions<TContext> {
   path?: string;
@@ -28,13 +28,44 @@ interface CursorRow {
 
 interface OrderedDataRow extends DataRow, CursorRow {}
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function dataRow(value: unknown): DataRow | null {
+  if (!isRecord(value)) return null;
+  return typeof value.data === "string" ? { data: value.data } : null;
+}
+
+function cursorRow(value: unknown): CursorRow | null {
+  if (!isRecord(value)) return null;
+  if (typeof value.id !== "string" || typeof value.created_at !== "string") return null;
+  return { id: value.id, created_at: value.created_at };
+}
+
+function orderedDataRow(value: unknown): OrderedDataRow | null {
+  const data = dataRow(value);
+  const cursor = cursorRow(value);
+  return data && cursor ? { ...cursor, ...data } : null;
+}
+
+function orderedDataRows(values: unknown[]): OrderedDataRow[] {
+  return values.map((value) => {
+    const row = orderedDataRow(value);
+    if (!row) {
+      throw new TypeError("SQLite query returned an unexpected ordered data row shape.");
+    }
+    return row;
+  });
+}
+
 export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
-  private readonly db: Database;
+  private readonly db: DatabaseSync;
   private readonly getUserId: (context: TContext) => string;
 
   constructor(options: SQLiteStoreOptions<TContext>) {
     super();
-    this.db = new Database(options.path ?? "chatkit.sqlite");
+    this.db = new DatabaseSync(options.path ?? "chatkit.sqlite");
     this.getUserId = options.getUserId;
     this.createSchema();
   }
@@ -53,7 +84,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     const parsed = ThreadMetadataSchema.parse(thread);
 
     this.db
-      .query(
+      .prepare(
         `INSERT INTO threads (user_id, id, created_at, data)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(user_id, id) DO UPDATE SET
@@ -84,7 +115,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     const parsed = ThreadItemSchema.parse({ ...item, thread_id: threadId });
 
     this.db
-      .query(
+      .prepare(
         `INSERT INTO items (user_id, thread_id, id, created_at, data)
          VALUES (?, ?, ?, ?, ?)`,
       )
@@ -97,7 +128,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     const parsed = ThreadItemSchema.parse({ ...item, thread_id: threadId });
 
     this.db
-      .query(
+      .prepare(
         `INSERT INTO items (user_id, thread_id, id, created_at, data)
          VALUES (?, ?, ?, ?, ?)
          ON CONFLICT(user_id, thread_id, id) DO UPDATE SET
@@ -134,7 +165,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   async deleteThread(threadId: string, context: TContext): Promise<void> {
     const userId = this.userId(context);
     this.threadRow(userId, threadId);
-    this.db.query("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, threadId);
+    this.db.prepare("DELETE FROM threads WHERE user_id = ? AND id = ?").run(userId, threadId);
   }
 
   async deleteThreadItem(threadId: string, itemId: string, context: TContext): Promise<void> {
@@ -142,7 +173,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     this.threadRow(userId, threadId);
     this.itemRow(userId, threadId, itemId);
     this.db
-      .query("DELETE FROM items WHERE user_id = ? AND thread_id = ? AND id = ?")
+      .prepare("DELETE FROM items WHERE user_id = ? AND thread_id = ? AND id = ?")
       .run(userId, threadId, itemId);
   }
 
@@ -151,7 +182,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     const parsed = AttachmentSchema.parse(attachment);
 
     this.db
-      .query(
+      .prepare(
         `INSERT OR REPLACE INTO attachments (user_id, id, data)
          VALUES (?, ?, ?)`,
       )
@@ -166,7 +197,7 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   async deleteAttachment(attachmentId: string, context: TContext): Promise<void> {
     const userId = this.userId(context);
     this.attachmentRow(userId, attachmentId);
-    this.db.query("DELETE FROM attachments WHERE user_id = ? AND id = ?").run(userId, attachmentId);
+    this.db.prepare("DELETE FROM attachments WHERE user_id = ? AND id = ?").run(userId, attachmentId);
   }
 
   private createSchema(): void {
@@ -213,9 +244,9 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   }
 
   private threadRow(userId: string, threadId: string): DataRow {
-    const row = this.db
-      .query<DataRow, [string, string]>("SELECT data FROM threads WHERE user_id = ? AND id = ?")
-      .get(userId, threadId);
+    const row = dataRow(
+      this.db.prepare("SELECT data FROM threads WHERE user_id = ? AND id = ?").get(userId, threadId),
+    );
 
     if (!row) {
       throw new NotFoundError(`Thread not found: ${threadId}`);
@@ -225,11 +256,13 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   }
 
   private itemRow(userId: string, threadId: string, itemId: string): DataRow {
-    const row = this.db
-      .query<DataRow, [string, string, string]>(
-        "SELECT data FROM items WHERE user_id = ? AND thread_id = ? AND id = ?",
-      )
-      .get(userId, threadId, itemId);
+    const row = dataRow(
+      this.db
+        .prepare(
+          "SELECT data FROM items WHERE user_id = ? AND thread_id = ? AND id = ?",
+        )
+        .get(userId, threadId, itemId),
+    );
 
     if (!row) {
       throw new NotFoundError(`Thread item not found: ${itemId}`);
@@ -239,9 +272,11 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   }
 
   private attachmentRow(userId: string, attachmentId: string): DataRow {
-    const row = this.db
-      .query<DataRow, [string, string]>("SELECT data FROM attachments WHERE user_id = ? AND id = ?")
-      .get(userId, attachmentId);
+    const row = dataRow(
+      this.db
+        .prepare("SELECT data FROM attachments WHERE user_id = ? AND id = ?")
+        .get(userId, attachmentId),
+    );
 
     if (!row) {
       throw new NotFoundError(`Attachment not found: ${attachmentId}`);
@@ -251,11 +286,11 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   }
 
   private threadCursor(userId: string, threadId: string): CursorRow {
-    const row = this.db
-      .query<CursorRow, [string, string]>(
-        "SELECT id, created_at FROM threads WHERE user_id = ? AND id = ?",
-      )
-      .get(userId, threadId);
+    const row = cursorRow(
+      this.db
+        .prepare("SELECT id, created_at FROM threads WHERE user_id = ? AND id = ?")
+        .get(userId, threadId),
+    );
 
     if (!row) {
       throw new NotFoundError(`Thread cursor not found: ${threadId}`);
@@ -265,11 +300,11 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   }
 
   private itemCursor(userId: string, threadId: string, itemId: string): CursorRow {
-    const row = this.db
-      .query<CursorRow, [string, string, string]>(
-        "SELECT id, created_at FROM items WHERE user_id = ? AND thread_id = ? AND id = ?",
-      )
-      .get(userId, threadId, itemId);
+    const row = cursorRow(
+      this.db
+        .prepare("SELECT id, created_at FROM items WHERE user_id = ? AND thread_id = ? AND id = ?")
+        .get(userId, threadId, itemId),
+    );
 
     if (!row) {
       throw new NotFoundError(`Thread item cursor not found: ${itemId}`);
@@ -281,15 +316,17 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   private threadRows(userId: string, limit: number, order: "asc" | "desc"): OrderedDataRow[] {
     const orderSql = this.orderSql(order);
 
-    return this.db
-      .query<OrderedDataRow, [string, number]>(
-        `SELECT id, created_at, data
-         FROM threads
-         WHERE user_id = ?
-         ORDER BY created_at ${orderSql}, id ${orderSql}
-         LIMIT ?`,
-      )
-      .all(userId, this.queryLimit(limit));
+    return orderedDataRows(
+      this.db
+        .prepare(
+          `SELECT id, created_at, data
+           FROM threads
+           WHERE user_id = ?
+           ORDER BY created_at ${orderSql}, id ${orderSql}
+           LIMIT ?`,
+        )
+        .all(userId, this.queryLimit(limit)),
+    );
   }
 
   private threadRowsAfter(
@@ -302,16 +339,18 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     const orderSql = this.orderSql(order);
     const comparator = order === "asc" ? ">" : "<";
 
-    return this.db
-      .query<OrderedDataRow, [string, string, string, string, number]>(
-        `SELECT id, created_at, data
-         FROM threads
-         WHERE user_id = ?
-           AND (created_at ${comparator} ? OR (created_at = ? AND id ${comparator} ?))
-         ORDER BY created_at ${orderSql}, id ${orderSql}
-         LIMIT ?`,
-      )
-      .all(userId, cursor.created_at, cursor.created_at, cursor.id, this.queryLimit(limit));
+    return orderedDataRows(
+      this.db
+        .prepare(
+          `SELECT id, created_at, data
+           FROM threads
+           WHERE user_id = ?
+             AND (created_at ${comparator} ? OR (created_at = ? AND id ${comparator} ?))
+           ORDER BY created_at ${orderSql}, id ${orderSql}
+           LIMIT ?`,
+        )
+        .all(userId, cursor.created_at, cursor.created_at, cursor.id, this.queryLimit(limit)),
+    );
   }
 
   private itemRows(
@@ -322,15 +361,17 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
   ): OrderedDataRow[] {
     const orderSql = this.orderSql(order);
 
-    return this.db
-      .query<OrderedDataRow, [string, string, number]>(
-        `SELECT id, created_at, data
-         FROM items
-         WHERE user_id = ? AND thread_id = ?
-         ORDER BY created_at ${orderSql}, id ${orderSql}
-         LIMIT ?`,
-      )
-      .all(userId, threadId, this.queryLimit(limit));
+    return orderedDataRows(
+      this.db
+        .prepare(
+          `SELECT id, created_at, data
+           FROM items
+           WHERE user_id = ? AND thread_id = ?
+           ORDER BY created_at ${orderSql}, id ${orderSql}
+           LIMIT ?`,
+        )
+        .all(userId, threadId, this.queryLimit(limit)),
+    );
   }
 
   private itemRowsAfter(
@@ -344,16 +385,18 @@ export class SQLiteStore<TContext = unknown> extends BaseStore<TContext> {
     const orderSql = this.orderSql(order);
     const comparator = order === "asc" ? ">" : "<";
 
-    return this.db
-      .query<OrderedDataRow, [string, string, string, string, string, number]>(
-        `SELECT id, created_at, data
-         FROM items
-         WHERE user_id = ? AND thread_id = ?
-           AND (created_at ${comparator} ? OR (created_at = ? AND id ${comparator} ?))
-         ORDER BY created_at ${orderSql}, id ${orderSql}
-         LIMIT ?`,
-      )
-      .all(userId, threadId, cursor.created_at, cursor.created_at, cursor.id, this.queryLimit(limit));
+    return orderedDataRows(
+      this.db
+        .prepare(
+          `SELECT id, created_at, data
+           FROM items
+           WHERE user_id = ? AND thread_id = ?
+             AND (created_at ${comparator} ? OR (created_at = ? AND id ${comparator} ?))
+           ORDER BY created_at ${orderSql}, id ${orderSql}
+           LIMIT ?`,
+        )
+        .all(userId, threadId, cursor.created_at, cursor.created_at, cursor.id, this.queryLimit(limit)),
+    );
   }
 
   private page<T>(rows: OrderedDataRow[], limit: number, parse: (row: OrderedDataRow) => T): Page<T> {

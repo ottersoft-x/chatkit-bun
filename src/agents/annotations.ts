@@ -1,4 +1,4 @@
-import type { Annotation } from "../types/core";
+import type { Annotation } from "../types/core.js";
 
 type UnknownRecord = Record<string, unknown>;
 

@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import { accumulateText } from "../src/agents";
-import { Card, Text, streamWidget } from "../src/widgets";
+import { expect } from "./helpers/expect.js";
+
+import { accumulateText } from "../src/agents/index.js";
+import { Card, Text, streamWidget } from "../src/widgets/index.js";
 
 const testThread = {
   id: "thr_accumulate",

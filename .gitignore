@@ -1,4 +1,4 @@
-# dependencies (bun install)
+# dependencies (npm install)
 node_modules
 
 # local implementation worktrees
@@ -7,6 +7,7 @@ node_modules
 # output
 out
 dist
+.tmp/
 *.tgz
 
 # code coverage

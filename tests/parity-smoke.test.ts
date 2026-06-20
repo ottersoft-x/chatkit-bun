@@ -1,13 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
+import { access, readFile } from "node:fs/promises";
 
-import matrix from "../docs/parity/matrix.json";
-import upstream from "../docs/parity/upstream.json";
-import { AgentContext, streamAgentResponse } from "../src/agents";
-import { createChatKitHandler } from "../src/http";
-import { ChatKitServer, StreamingResult } from "../src/server";
-import { SQLiteStore } from "../src/sqlite-store";
-import type { ThreadItem, ThreadMetadata } from "../src/types/core";
-import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../src/types/server";
+import { expect } from "./helpers/expect.js";
+
+import { AgentContext, streamAgentResponse } from "../src/agents/index.js";
+import { createChatKitHandler } from "../src/http.js";
+import { ChatKitServer, StreamingResult } from "../src/server.js";
+import { SQLiteStore } from "../src/sqlite-store.js";
+import type { ThreadItem, ThreadMetadata } from "../src/types/core.js";
+import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../src/types/server.js";
 
 const validStatuses = new Set([
   "covered",
@@ -32,13 +33,29 @@ type ParityRow = {
   area?: unknown;
   status?: unknown;
   upstream?: unknown;
-  bun?: {
+  nodejs?: {
     tests?: string[];
     sources?: string[];
     docs?: string[];
   };
   notes?: unknown;
 };
+
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function readJson<T>(path: string): Promise<T> {
+  return JSON.parse(await readFile(path, "utf8")) as T;
+}
+
+const matrix = await readJson<{ schemaVersion: number; upstream: unknown; rows: unknown[] }>("docs/parity/matrix.json");
+const upstream = await readJson("docs/parity/upstream.json");
 
 function expectString(value: unknown, label: string): asserts value is string {
   expect(typeof value, label).toBe("string");
@@ -47,7 +64,7 @@ function expectString(value: unknown, label: string): asserts value is string {
 
 async function expectLocalFilesExist(rowId: string, paths: string[]): Promise<void> {
   for (const path of paths) {
-    expect(await Bun.file(path).exists(), `${rowId} references missing local file ${path}`).toBe(true);
+    expect(await fileExists(path), `${rowId} references missing local file ${path}`).toBe(true);
   }
 }
 
@@ -211,13 +228,13 @@ describe("parity matrix", () => {
       expect(validStatuses.has(row.status), `${row.id} has unknown status ${row.status}`).toBe(true);
 
       expect(row.upstream, `${row.id} upstream reference`).toBeTruthy();
-      expect(row.bun, `${row.id} Bun reference`).toBeTruthy();
+      expect(row.nodejs, `${row.id} Node.js reference`).toBeTruthy();
       expectString(row.notes, `${row.id} notes`);
 
       const localReferences = [
-        ...(row.bun?.tests ?? []),
-        ...(row.bun?.sources ?? []),
-        ...(row.bun?.docs ?? []),
+        ...(row.nodejs?.tests ?? []),
+        ...(row.nodejs?.sources ?? []),
+        ...(row.nodejs?.docs ?? []),
       ];
       if (row.status !== "deferred" && row.status !== "not-applicable") {
         expect(localReferences.length, `${row.id} should cite local coverage`).toBeGreaterThan(0);

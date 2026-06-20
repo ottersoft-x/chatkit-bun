@@ -1,4 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
+
+import { expect } from "./helpers/expect.js";
 
 import {
   Card,
@@ -19,7 +21,7 @@ import {
   type ThreadItem,
   type UserMessageTagContent,
   type WorkflowItem,
-} from "../src";
+} from "../src/index.js";
 
 const now = "2026-05-28T00:00:00.000Z";
 const threadId = "thr_1";

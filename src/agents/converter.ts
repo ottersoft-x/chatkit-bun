@@ -1,7 +1,7 @@
 import type { AgentInputItem } from "@openai/agents";
 
-import type { Attachment, ThreadItem, UserMessageContent } from "../types/core";
-import { serializeWidget } from "../widgets";
+import type { Attachment, ThreadItem, UserMessageContent } from "../types/core.js";
+import { serializeWidget } from "../widgets/index.js";
 
 export type UserMessageItem = Extract<ThreadItem, { type: "user_message" }>;
 export type AssistantMessageItem = Extract<ThreadItem, { type: "assistant_message" }>;

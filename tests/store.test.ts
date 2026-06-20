@@ -1,9 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import { NotFoundError } from "../src/errors";
-import { defaultGenerateId } from "../src/store";
-import { SQLiteStore } from "../src/sqlite-store";
-import type { Attachment, ThreadItem, ThreadMetadata } from "../src/types/core";
+import { expect } from "./helpers/expect.js";
+
+import { NotFoundError } from "../src/errors.js";
+import { defaultGenerateId } from "../src/store.js";
+import { SQLiteStore } from "../src/sqlite-store.js";
+import type { Attachment, ThreadItem, ThreadMetadata } from "../src/types/core.js";
 
 interface RequestContext {
   user_id: string;
@@ -34,7 +36,7 @@ function makeMessage(id = "msg_test", createdAt = "2026-05-26T00:00:01.000Z"): A
 }
 
 describe("store helpers", () => {
-  test.each([
+  const idCases = [
     ["thread", /^thr_[0-9a-f]{8}$/],
     ["message", /^msg_[0-9a-f]{8}$/],
     ["tool_call", /^tc_[0-9a-f]{8}$/],
@@ -42,9 +44,13 @@ describe("store helpers", () => {
     ["workflow", /^wf_[0-9a-f]{8}$/],
     ["attachment", /^atc_[0-9a-f]{8}$/],
     ["sdk_hidden_context", /^shcx_[0-9a-f]{8}$/],
-  ] as const)("generates %s ids", (itemType, pattern) => {
-    expect(defaultGenerateId(itemType)).toMatch(pattern);
-  });
+  ] as const;
+
+  for (const [itemType, pattern] of idCases) {
+    test(`generates ${itemType} ids`, () => {
+      expect(defaultGenerateId(itemType)).toMatch(pattern);
+    });
+  }
 });
 
 describe("SQLiteStore", () => {

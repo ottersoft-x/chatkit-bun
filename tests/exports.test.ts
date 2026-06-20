@@ -1,7 +1,9 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import * as exports from "../src";
-import type { ResponseStreamConverterOptions, ThreadItemConverterResult } from "../src";
+import { expect } from "./helpers/expect.js";
+
+import * as exports from "../src/index.js";
+import type { ResponseStreamConverterOptions, ThreadItemConverterResult } from "../src/index.js";
 import {
   ActionConfigSchema,
   AgentContext,
@@ -26,7 +28,7 @@ import {
   simpleToAgentInput,
   streamAgentResponse,
   streamWidget,
-} from "../src";
+} from "../src/index.js";
 
 function assertResponseStreamConverterOptions(_options: ResponseStreamConverterOptions): void {}
 function assertThreadItemConverterResult(_result: ThreadItemConverterResult): void {}

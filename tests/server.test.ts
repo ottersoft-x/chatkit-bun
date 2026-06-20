@@ -1,11 +1,13 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import type { ActionConfig } from "../src/actions";
-import { NotFoundError, UnsupportedOperationError } from "../src/errors";
-import { ChatKitServer, NonStreamingResult, StreamCancelledError, StreamingResult } from "../src/server";
-import { SQLiteStore } from "../src/sqlite-store";
-import type { AttachmentStore } from "../src/store";
-import type { Attachment, ThreadItem, ThreadMetadata } from "../src/types/core";
+import { expect } from "./helpers/expect.js";
+
+import type { ActionConfig } from "../src/actions.js";
+import { NotFoundError, UnsupportedOperationError } from "../src/errors.js";
+import { ChatKitServer, NonStreamingResult, StreamCancelledError, StreamingResult } from "../src/server.js";
+import { SQLiteStore } from "../src/sqlite-store.js";
+import type { AttachmentStore } from "../src/store.js";
+import type { Attachment, ThreadItem, ThreadMetadata } from "../src/types/core.js";
 import {
   DEFAULT_PAGE_SIZE,
   type AudioInput,
@@ -13,7 +15,7 @@ import {
   type SyncCustomActionResponse,
   type ThreadStreamEvent,
   type TranscriptionResult,
-} from "../src/types/server";
+} from "../src/types/server.js";
 
 interface RequestContext {
   user_id: string;

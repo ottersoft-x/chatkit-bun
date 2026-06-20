@@ -1,10 +1,10 @@
-import type { StoreItemType } from "../store";
-import { defaultGenerateId } from "../store";
-import type { ThreadItem, ThreadMetadata } from "../types/core";
-import type { ThreadStreamEvent } from "../types/server";
-import { diffWidget } from "./diff";
-import { serializeWidget } from "./serialization";
-import type { WidgetRoot } from "./types";
+import type { StoreItemType } from "../store.js";
+import { defaultGenerateId } from "../store.js";
+import type { ThreadItem, ThreadMetadata } from "../types/core.js";
+import type { ThreadStreamEvent } from "../types/server.js";
+import { diffWidget } from "./diff.js";
+import { serializeWidget } from "./serialization.js";
+import type { WidgetRoot } from "./types.js";
 
 export interface StreamWidgetOptions {
   copyText?: string | null;

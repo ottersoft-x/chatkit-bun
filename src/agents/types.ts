@@ -1,7 +1,7 @@
-import type { Store } from "../store";
-import type { JsonValue } from "../serialization";
-import type { ThreadMetadata } from "../types/core";
-import type { ResponseStreamConverter } from "./annotations";
+import type { Store } from "../store.js";
+import type { JsonValue } from "../serialization.js";
+import type { ThreadMetadata } from "../types/core.js";
+import type { ResponseStreamConverter } from "./annotations.js";
 
 export interface AgentContextOptions<TContext> {
   thread: ThreadMetadata;
@@ -25,6 +25,6 @@ export interface ToolCallMetadata {
   callId: string | null;
 }
 
-export type { JsonValue } from "../serialization";
+export type { JsonValue } from "../serialization.js";
 
 export type JsonObject = { [key: string]: JsonValue };

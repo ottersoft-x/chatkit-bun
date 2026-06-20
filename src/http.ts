@@ -1,4 +1,4 @@
-import { NonStreamingResult, StreamingResult, type ChatKitServer } from "./server";
+import { NonStreamingResult, StreamingResult, type ChatKitServer } from "./server.js";
 
 export interface ChatKitHandlerOptions<TContext> {
   getContext?: (request: Request) => TContext | Promise<TContext>;
@@ -17,7 +17,7 @@ export function createChatKitHandler<TContext = undefined>(
     const result = await server.process(await request.arrayBuffer(), context);
 
     if (result instanceof NonStreamingResult) {
-      return new Response(result.json, {
+      return new Response(new Uint8Array(result.json), {
         headers: {
           "content-type": "application/json",
         },

@@ -1,7 +1,7 @@
-import type { Task, ThreadItem, Workflow, WorkflowSummary } from "../types/core";
-import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server";
-import { streamWidget as streamWidgetEvents, type WidgetRoot } from "../widgets";
-import type { AgentContextOptions, JsonObject } from "./types";
+import type { Task, ThreadItem, Workflow, WorkflowSummary } from "../types/core.js";
+import { ThreadStreamEventSchema, type ThreadStreamEvent } from "../types/server.js";
+import { streamWidget as streamWidgetEvents, type WidgetRoot } from "../widgets/index.js";
+import type { AgentContextOptions, JsonObject } from "./types.js";
 import {
   appendWorkflowTask,
   createWorkflowItem,
@@ -10,7 +10,7 @@ import {
   shouldEmitWorkflowAdded,
   updateWorkflowTaskEvent,
   workflowAddedEvent,
-} from "./workflows";
+} from "./workflows.js";
 
 class AsyncEventQueue<T> implements AsyncIterable<T> {
   private readonly values: T[] = [];

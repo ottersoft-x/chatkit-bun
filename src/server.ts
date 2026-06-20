@@ -1,7 +1,7 @@
-import { NotFoundError, UnsupportedOperationError, ValidationError } from "./errors";
-import { decodeJsonBytes, encodeJsonBytes } from "./serialization";
-import type { AttachmentStore, Store } from "./store";
-import { ThreadMetadataSchema, type Page, type ThreadItem, type ThreadMetadata } from "./types/core";
+import { NotFoundError, UnsupportedOperationError, ValidationError } from "./errors.js";
+import { decodeJsonBytes, encodeJsonBytes } from "./serialization.js";
+import type { AttachmentStore, Store } from "./store.js";
+import { ThreadMetadataSchema, type Page, type ThreadItem, type ThreadMetadata } from "./types/core.js";
 import {
   ChatKitRequestSchema,
   DEFAULT_PAGE_SIZE,
@@ -23,7 +23,7 @@ import {
   type ThreadStreamEvent,
   type TranscriptionResult,
   type UserMessageInput,
-} from "./types/server";
+} from "./types/server.js";
 
 const sseEncoder = new TextEncoder();
 const sseDecoder = new TextDecoder();

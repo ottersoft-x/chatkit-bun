@@ -1,5 +1,5 @@
-import type { ActionConfig } from "../actions";
-import type { DynamicWidgetComponent, DynamicWidgetRoot, WidgetJson } from "./types";
+import type { ActionConfig } from "../actions.js";
+import type { DynamicWidgetComponent, DynamicWidgetRoot, WidgetJson } from "./types.js";
 
 type ActionConfigInput = {
   type: ActionConfig["type"];

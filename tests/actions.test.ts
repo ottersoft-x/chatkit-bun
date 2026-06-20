@@ -1,6 +1,8 @@
-import { describe, expect, test } from "bun:test";
+import { describe, test } from "node:test";
 
-import { ActionConfigSchema, createActionConfig } from "../src/actions";
+import { expect } from "./helpers/expect.js";
+
+import { ActionConfigSchema, createActionConfig } from "../src/actions.js";
 
 describe("actions", () => {
   test("creates Python-compatible default action config", () => {
