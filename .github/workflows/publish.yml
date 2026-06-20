@@ -18,25 +18,21 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
       - uses: actions/setup-node@v4
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+          cache: npm
 
-      - run: bun install --frozen-lockfile
-      - run: bun run verify
-      - run: bun run build:types
+      - run: npm ci
+      - run: npm run verify
 
       - name: Read package metadata
         id: package
         shell: bash
         run: |
-          NAME=$(bun -p "require('./package.json').name")
-          VERSION=$(bun -p "require('./package.json').version")
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
           TAG="v$VERSION"
 
           echo "name=$NAME" >> "$GITHUB_OUTPUT"

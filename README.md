@@ -1,44 +1,55 @@
-# chatkit-bun
+# chatkit-nodejs
 
-`chatkit-bun` is a Bun-native server bridge for ChatKit-style thread APIs. It is a TypeScript/Bun port derived from OpenAI's Apache-2.0 licensed `openai-chatkit` Python package.
+`chatkit-nodejs` is a Node.js server bridge for ChatKit-style thread APIs. It is
+a TypeScript/Node.js port derived from OpenAI's Apache-2.0 licensed
+`openai-chatkit` Python package.
 
 - ChatKit request processing and SSE response helpers.
-- SQLite-backed thread and item storage.
+- SQLite-backed thread and item storage using Node's built-in `node:sqlite`.
 - Widget serialization and streaming helpers.
-- `@openai/agents` stream conversion helpers for Bun servers.
+- `@openai/agents` stream conversion helpers for Node.js servers.
 
 ## Transparency
 
-This package has been developed heavily with AI assistance using [Superpowers](https://github.com/obra/superpowers), an agentic skills framework and software development methodology.
+This package has been developed heavily with AI assistance using
+[Superpowers](https://github.com/obra/superpowers), an agentic skills framework
+and software development methodology.
 
 ## Development
 
-Install in a Bun app:
+Install in a Node.js app:
 
 ```bash
-bun add chatkit-bun
+npm install chatkit-nodejs
 ```
 
 Install dependencies:
 
 ```bash
-bun install
+npm install
 ```
 
-Run typecheck and tests:
+Run typecheck, tests, package smoke checks, and pack inspection:
 
 ```bash
-bun run verify
+npm run verify
 ```
 
-The package is source-distributed for Bun apps. Its package entrypoint is `src/index.ts`, with TypeScript declarations emitted under `types`.
+The package publishes compiled ESM JavaScript and TypeScript declarations under
+`dist/`. Node.js `>=24.15.0` is required.
 
-## Bun Agent Server Example
+## Node.js Agent Server Example
 
-Use `ChatKitServer` to bridge ChatKit requests to an `@openai/agents` workflow. This example streams an intake agent first, passes its summary to an isolated research agent that does not receive the prior chat history, then passes both outputs to the final answer agent. Each stage emits workflow updates so the frontend can show what is happening:
+Use `ChatKitServer` to bridge ChatKit requests to an `@openai/agents` workflow.
+This example streams an intake agent first, passes its summary to an isolated
+research agent that does not receive the prior chat history, then passes both
+outputs to the final answer agent. Each stage emits workflow updates so the
+frontend can show what is happening:
 
 ```ts
 import { Agent, run } from "@openai/agents";
+import { createServer } from "node:http";
+import { Readable } from "node:stream";
 import {
   AgentContext,
   ChatKitServer,
@@ -49,7 +60,7 @@ import {
   type ThreadItem,
   type ThreadMetadata,
   type ThreadStreamEvent,
-} from "chatkit-bun";
+} from "chatkit-nodejs";
 
 interface RequestContext {
   userId: string;
@@ -87,7 +98,7 @@ function threadPreviousResponseId(thread: ThreadMetadata): string | null {
 }
 
 class AppChatKitServer extends ChatKitServer<RequestContext> {
-  constructor(readonly sqlitePath = Bun.env.CHATKIT_SQLITE_PATH ?? "chatkit.sqlite") {
+  constructor(readonly sqlitePath = process.env.CHATKIT_SQLITE_PATH ?? "chatkit.sqlite") {
     super(
       new SQLiteStore<RequestContext>({
         path: sqlitePath,
@@ -185,17 +196,42 @@ const chatkitHandler = createChatKitHandler(new AppChatKitServer(), {
   getContext: requestContext,
 });
 
-const server = Bun.serve({
-  port: Number(Bun.env.PORT ?? 3000),
-  routes: {
-    "/health": new Response("ok"),
-    "/chatkit": {
-      POST: chatkitHandler,
-    },
-  },
+const server = createServer(async (incoming, outgoing) => {
+  const origin = `http://${incoming.headers.host ?? "localhost"}`;
+  const request = new Request(new URL(incoming.url ?? "/", origin), {
+    method: incoming.method,
+    headers: incoming.headers as HeadersInit,
+    body: incoming.method === "GET" || incoming.method === "HEAD" ? undefined : Readable.toWeb(incoming),
+    duplex: "half",
+  } as RequestInit & { duplex: "half" });
+
+  if (request.method === "GET" && new URL(request.url).pathname === "/health") {
+    outgoing.writeHead(200, { "content-type": "text/plain" });
+    outgoing.end("ok");
+    return;
+  }
+
+  if (request.method === "POST" && new URL(request.url).pathname === "/chatkit") {
+    const response = await chatkitHandler(request);
+    outgoing.writeHead(response.status, Object.fromEntries(response.headers));
+    if (response.body) {
+      for await (const chunk of response.body) {
+        outgoing.write(chunk);
+      }
+    }
+    outgoing.end();
+    return;
+  }
+
+  outgoing.writeHead(404, { "content-type": "text/plain" });
+  outgoing.end("not found");
 });
 
-console.log(`ChatKit server listening on ${server.url}`);
+const port = Number(process.env.PORT ?? 3000);
+server.listen(port, () => {
+  console.log(`ChatKit server listening on http://localhost:${port}`);
+});
 ```
 
-The server listens on `PORT` or `3000` and exposes `POST /chatkit`. It uses `x-user-id` as the per-request user id, falling back to `anonymous`.
+The server listens on `PORT` or `3000` and exposes `POST /chatkit`. It uses
+`x-user-id` as the per-request user id, falling back to `anonymous`.

@@ -16,7 +16,10 @@ for (const expected of ["package.json", "README.md", "LICENSE", "NOTICE", "dist/
   assert.equal(files.has(expected), true, `Expected packed package to include ${expected}`);
 }
 
-for (const forbidden of ["bun.lock", "tsconfig.types.json", "src/index.ts", "types/index.d.ts"]) {
+const oldSourceEntrypoint = ["src", "index.ts"].join("/");
+const oldTypesEntrypoint = ["types", "index.d.ts"].join("/");
+
+for (const forbidden of ["bun.lock", "tsconfig.types.json", oldSourceEntrypoint, oldTypesEntrypoint]) {
   assert.equal(files.has(forbidden), false, `Expected packed package to exclude ${forbidden}`);
 }
 
